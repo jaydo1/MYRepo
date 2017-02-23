@@ -1,0 +1,4 @@
+[cfn-auto-reloader-hook]
+triggers=post.update
+path=Resources.Instance.Metadata.BuildVersion
+action=cfn-init.exe -v -c config -s arn:aws:cloudformation:ap-southeast-2:112888586165:stack/LMBROrchestrator/530b36d0-0b4d-11e6-a33e-50fae957fc56 -r Instance --region=ap-southeast-2

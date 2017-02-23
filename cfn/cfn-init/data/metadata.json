@@ -1,0 +1,98 @@
+{
+    "AWS::CloudFormation::Init": {
+        "setup": {
+            "files": {
+                "c:\\powershell\\start-all-instances.ps1": {
+                    "content": "Set-DefaultAWSRegion -Region ap-southeast-2 \n$Instances = (Get-EC2Instance).instances \n$VPCS = Get-EC2Vpc \nforeach ($VPC in $VPCS) {\n    $Instances | Where-Object {$_.VpcId -eq $VPC.VpcId} | foreach {\n      $InstanceName =  ($_.Tags | Where-Object {$_.Key -eq 'Name'}).Value\nWrite-Host 'InstanceName: $InstanceName' \n       if ($InstanceName -like 'vc*') { \n           New-Object -TypeName PSObject -Property @{ \n               'VpcId' = $_.VpcId \n               'VPCName' = ($VPC.Tags | Where-Object {$_.Key -eq 'Name'}).Value \n               'InstanceId' = $_.InstanceId\n               'InstanceName' = ($_.Tags | Where-Object {$_.Key -eq 'Name'}).Value \n               'LaunchTime' = $_.LaunchTime \n               'State' = $_.State.Name \n               'KeyName' = $_.KeyName  \n           } \n            Start-EC2Instance -Instance $_.InstanceId \n       } \n   } \n} \n"
+                }, 
+                "c:\\powershell\\stop-all-instances.ps1": {
+                    "content": "Set-DefaultAWSRegion -Region ap-southeast-2 \n$Instances = (Get-EC2Instance).instances \n$VPCS = Get-EC2Vpc \nforeach ($VPC in $VPCS) {\n    $Instances | Where-Object {$_.VpcId -eq $VPC.VpcId} | foreach {\n      $InstanceName =  ($_.Tags | Where-Object {$_.Key -eq 'Name'}).Value\nWrite-Host 'InstanceName: $InstanceName' \n       if ($InstanceName -like 'vc*') { \n           New-Object -TypeName PSObject -Property @{ \n               'VpcId' = $_.VpcId \n               'VPCName' = ($VPC.Tags | Where-Object {$_.Key -eq 'Name'}).Value \n               'InstanceId' = $_.InstanceId\n               'InstanceName' = ($_.Tags | Where-Object {$_.Key -eq 'Name'}).Value \n               'LaunchTime' = $_.LaunchTime \n               'State' = $_.State.Name \n               'KeyName' = $_.KeyName  \n           } \n            Stop-EC2Instance -Instance $_.InstanceId \n       } \n   } \n} \n"
+                }, 
+                "c:\\powershell\\changeEc2Config.ps1": {
+                    "content": "$EC2SettingsFile=\"C:\\Program Files\\Amazon\\Ec2ConfigService\\Settings\\Config.xml\"\n$xml = [xml](get-content $EC2SettingsFile)\n$xmlElement = $xml.get_DocumentElement()\n$xmlElementToModify = $xmlElement.Plugins\nforeach ($element in $xmlElementToModify.Plugin)\n{\nif ($element.name -eq \"AWS.EC2.Windows.CloudWatch.PlugIn\")\n{\n$element.State=\"Enabled\"\n}\n}\n$xml.Save($EC2SettingsFile)\n"
+                }, 
+                "c:\\powershell\\scheduler-stop-all-instances.ps1": {
+                    "content": "$action = New-ScheduledTaskAction -Execute \"PowerShell.exe\" -Argument \"-ExecutionPolicy Unrestricted c:\\powershell\\stop-all-instances.ps1\"  \n$trigger =  New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday -At 6PM \nUnregister-ScheduledTask -TaskName 'StopAllInstances' -Confirm:$false \nRegister-ScheduledTask -Action $action -Trigger $trigger -TaskName 'StopAllInstances' -Description 'Stops All Instances' -User 'System' "
+                }, 
+                "c:\\cfn\\cfn-hup.conf": {
+                    "content": "[main]\nstack=LMBROrchestrator\nregion=ap-southeast-2\ninterval=5\n"
+                }, 
+                "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf": {
+                    "content": "[cfn-auto-reloader-hook]\ntriggers=post.update\npath=Resources.Instance.Metadata.BuildVersion\naction=cfn-init.exe -v -c config -s arn:aws:cloudformation:ap-southeast-2:112888586165:stack/LMBROrchestrator/530b36d0-0b4d-11e6-a33e-50fae957fc56 -r Instance --region=ap-southeast-2\n"
+                }, 
+                "c:\\powershell\\AMICleanup.ps1": {
+                    "content": "Set-DefaultAWSRegion -Region ap-southeast-2\n$currentDate = (Get-Date)\n$AMIS = Get-EC2Image -owner self -Filter @{ Name=\"description\"; Values=\"vc*\"}\nforeach ($ami in $AMIS) {\n    $ami.Name\n    Write-Host \"current date: \" $currentDate\n    $amiDate = $ami.Name.Substring($ami.Name.Length - 19,19)\n    $amiDate = [datetime]::ParseExact($amiDate, \"yyyy-MM-dd-HH-mm-ss\", $null)\n    write-host \"ami creation date: \" $amiDate\n    $y = ($currentDate - $amiDate).Days\n    Write-Host \"Day difference is \" $y \n    if ($y -gt 0) {\n        Write-Host \"Unregister image and delete EBS snapshots...\"\n        Write-Host \"ami_name: \" $ami.Name\n        Write-host \"ami_id: \" $ami.ImageId\n        Unregister-EC2Image -ImageId $ami.ImageId -Force\n        $ami.BlockDeviceMappings.ebs | ForEach-Object -Process { \n           Write-host \"Delete EBS snapshot: \" $_.SnapshotId\n           Remove-EC2Snapshot -SnapshotId $_.SnapshotId -Force\n        }\n    }\n}\n"
+                }, 
+                "c:\\powershell\\ScheduleAMICleanup.ps1": {
+                    "content": "$action = New-ScheduledTaskAction -Execute \"PowerShell.exe\" -Argument \"-ExecutionPolicy Unrestricted c:\\powershell\\AMICleanup.ps1\"  \n$trigger =  New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday -At 10PM \nUnregister-ScheduledTask -TaskName 'CleanupAMI' -Confirm:$false \nRegister-ScheduledTask -Action $action -Trigger $trigger -TaskName 'CleanupAMI' -Description 'Unregister AMI snapshot that is more than a day old' -User 'System' "
+                }, 
+                "c:\\powershell\\ScheduleAMICreation.ps1": {
+                    "content": "$action = New-ScheduledTaskAction -Execute \"PowerShell.exe\" -Argument \"-ExecutionPolicy Unrestricted c:\\powershell\\AMICreation.ps1\"  \n$trigger =  New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday -At 7PM \nUnregister-ScheduledTask -TaskName 'CreateAMI' -Confirm:$false \nRegister-ScheduledTask -Action $action -Trigger $trigger -TaskName 'CreateAMI' -Description 'Creates AMI snapshot of all instances' -User 'System' "
+                }, 
+                "c:\\powershell\\AMICreation.ps1": {
+                    "content": "Set-DefaultAWSRegion -Region ap-southeast-2\n$Instances = (Get-EC2Instance).instances\n$VPCS = Get-EC2Vpc\nforeach ($VPC in $VPCS) {\n    $Instances | Where-Object {$_.VpcId -eq $VPC.VpcId} | foreach {\n      $InstanceName =  ($_.Tags | Where-Object {$_.Key -eq 'Name'}).Value\n       if ($InstanceName -like 'vc*') {\n           New-Object -TypeName PSObject -Property @{\n               'VpcId' = $_.VpcId\n               'VPCName' = ($VPC.Tags | Where-Object {$_.Key -eq 'Name'}).Value\n               'InstanceId' = $_.InstanceId \n               'InstanceName' = ($_.Tags | Where-Object {$_.Key -eq 'Name'}).Value\n               'LaunchTime' = $_.LaunchTime\n               'State' = $_.State.Name\n              'KeyName' = $_.KeyName\n           }\n           if ($_.State.Name -like 'running') {\n               Stop-EC2Instance -Instance $_.InstanceId\n               Start-Sleep -Seconds 100\n           }\n           $longTime =  Get-Date -Format 'yyyy-MM-dd-HH-mm-ss' # Get current time into a string\n           $tagDate =  Get-Date -Format 'yyyy-MM-dd'\n           $tagDesc = $instanceName + '-' + $tagDate\n           $amiName = $instanceName + '-' + $longTime # Make a name for the AMI\n           $amiID = New-EC2Image -InstanceId $_.InstanceId  -Description $tagDesc -Name $amiName -NoReboot:$true # Create the AMI without reboot\n           $tag2 = New-Object Amazon.EC2.Model.Tag\n           $tag2.Key = 'Name'\n           $tag2.Value = $instanceName\n           New-EC2Tag -Resource $amiID -Tag $tag2\n           Write-Host 'amiID:'+  $amiID \n           Write-Host 'amiTAG:' + $tag \n           Start-Sleep -Seconds 60\n           $amiProperties = Get-EC2Image -ImageIds $amiID # Get Amazon.EC2.Model.Image\n           $amiBlockDeviceMapping = $amiProperties.BlockDeviceMapping\n           $amiBlockDeviceMapping.ebs | `\n           ForEach-Object -Process {New-EC2Tag -Resources $_.SnapshotID -Tags @{ Key = \"Name\" ; Value = $tagDesc} } # Add tags to snapshots\n       }  \n   }  \n}  \n"
+                }, 
+                "c:\\powershell\\scheduler-start-all-instances.ps1": {
+                    "content": "$action = New-ScheduledTaskAction -Execute \"PowerShell.exe\" -Argument \"-ExecutionPolicy Unrestricted c:\\powershell\\start-all-instances.ps1\"  \n$trigger =  New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday -At 7AM \nUnregister-ScheduledTask -TaskName 'StartAllInstances' -Confirm:$false \nRegister-ScheduledTask -Action $action -Trigger $trigger -TaskName 'StartAllInstances' -Description 'Starts All Instances' -User 'System' "
+                }
+            }, 
+            "services": {
+                "windows": {
+                    "cfn-hup": {
+                        "files": [
+                            "c:\\cfn\\cfn-hup.conf", 
+                            "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf"
+                        ], 
+                        "ensureRunning": "true", 
+                        "enabled": "true"
+                    }
+                }
+            }, 
+            "commands": {
+                "2-disable-windowsupdate": {
+                    "command": "PowerShell.exe -ExecutionPolicy Unrestricted set-service -name \"wuauserv\" -Status Stopped -StartupType disabled"
+                }, 
+                "1-change-timezone": {
+                    "command": "tzutil /s \"AUS Eastern Standard Time_dstoff\""
+                }
+            }
+        }, 
+        "signal": {
+            "commands": {
+                "1-signal-success": {
+                    "command": "cfn-signal.exe -e 0 --stack LMBROrchestrator --resource Instance --region ap-southeast-2\n"
+                }
+            }
+        }, 
+        "finalize": {
+            "commands": {
+                "5-AMICreationScheduler": {
+                    "command": "PowerShell.exe -ExecutionPolicy Unrestricted c:\\powershell\\ScheduleAMICreation.ps1"
+                }, 
+                "1-setExecutionPolicy": {
+                    "command": "PowerShell.exe Set-ExecutionPolicy Unrestricted"
+                }, 
+                "6-AMICleanUpScheduler": {
+                    "command": "PowerShell.exe -ExecutionPolicy Unrestricted c:\\powershell\\ScheduleAMICleanup.ps1"
+                }, 
+                "4-stopScheduler": {
+                    "command": "PowerShell.exe -ExecutionPolicy Unrestricted c:\\powershell\\scheduler-stop-all-instances.ps1"
+                }, 
+                "2-setDefaultRegion": {
+                    "command": "PowerShell.exe Set-DefaultAWSRegion -Region ap-southeast-2"
+                }, 
+                "3-startScheduler": {
+                    "command": "PowerShell.exe -ExecutionPolicy Unrestricted c:\\powershell\\scheduler-start-all-instances.ps1"
+                }
+            }
+        }, 
+        "configSets": {
+            "config": [
+                "setup", 
+                "finalize", 
+                "signal"
+            ]
+        }
+    }, 
+    "BuildVersion": "1"
+}
