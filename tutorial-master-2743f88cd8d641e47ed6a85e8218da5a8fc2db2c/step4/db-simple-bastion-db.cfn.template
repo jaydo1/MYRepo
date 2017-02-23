@@ -1,0 +1,214 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+
+  "Description" : "AWS CloudFormation Template RDS DB Instance: Create an RDS DBInstance in an existing Virtual Private Cloud (VPC).",
+
+  "Parameters" : {
+    
+    "Subnets" : {
+      "Type" : "CommaDelimitedList",
+      "Description" : "The list of SubnetIds, for at least two Availability Zones in the region in your Virtual Private Cloud (VPC)"
+    },
+
+    "MySqlSG" : {
+      "Type" : "String",
+      "Description" : "SecurityGroup for RDS MySQL Instance"
+    }, 
+    
+    "MyAppSG" : {
+      "Type" : "String",
+      "Description" : "SecurityGroup for App Instance"
+    }, 
+    
+    "AlarmTopic" : {
+      "Description": "SNS topic to notify if there are operational issues",
+      "Type": "String",
+      "Default": "none"
+    },
+    
+    "MySqlDBName" : {
+      "Description" : "The database name",
+      "Type": "String"
+    },
+
+    "MySqlUsername" : {
+      "NoEcho": "true",
+      "Description" : "The database admin account username",
+      "Type": "String"
+    },
+
+    "MySqlPassword" : {
+      "NoEcho": "true",
+      "Description" : "The database admin account password",
+      "Type": "String"
+    },
+
+    "MySqlClass" : {
+      "Default" : "db.t1.micro",
+      "Description" : "Database instance class",
+      "Type" : "String",
+      "AllowedValues" : [ 
+        "db.t1.micro",
+        "db.m1.small", 
+        "db.m1.large", 
+        "db.m1.xlarge", 
+        "db.m2.xlarge", 
+        "db.m2.2xlarge", 
+        "db.m2.4xlarge" 
+      ],
+      "ConstraintDescription" : "must select a valid database instance type."
+    },
+
+    "MySqlAllocatedStorage" : {
+      "Default": "5",
+      "Description" : "The size of the database (Gb)",
+      "Type": "Number",
+      "MinValue": "5",
+      "MaxValue": "3072",
+      "ConstraintDescription" : "must be between 5 and 3072Gb."
+    },
+    
+    "MySqlEngineVersion" : {
+      "Default": "5.6",
+      "Description" : "MySQL Engine Version",
+      "Type": "String",
+      "AllowedValues" : [ "5.1", "5.5", "5.6" ],
+      "ConstraintDescription" : "Must be either 5.1, 5.5 or 5.6."
+    },
+
+    "MySqlAutoMinorVersionUpgrade" : {
+      "Default": "true",
+      "Description" : "Enable minor version upgrades during maintenance",
+      "Type": "String",
+      "AllowedValues" : [ "true", "false" ],
+      "ConstraintDescription" : "Must be either true or false."
+    },
+    
+    "MySqlPort" : {
+      "Default": "3306",
+      "Description" : "MySQL TCP Port",
+      "Type": "Number",
+      "MinValue": "1150",
+      "MaxValue": "65535",
+      "ConstraintDescription" : "TCP Port, unprivileged."
+    },
+    
+    "EnvSuffix": {
+      "Description": "The key of the template for the EB resources and application substack",
+      "Type": "String"
+    }
+    
+  },
+    
+  "Mappings" : {
+    "InstanceTypeMap" : {
+      "db.m1.small" : {
+        "CPULimit" : "60",
+        "FreeStorageSpaceLimit" : "1024",
+        "ReadIOPSLimit" : "100",
+        "WriteIOPSLimit" : "100"
+      },
+      "db.m1.large" : {
+        "CPULimit" : "60",
+        "FreeStorageSpaceLimit" : "1024",
+        "ReadIOPSLimit" : "100",
+        "WriteIOPSLimit" : "100"
+      },
+      "db.m1.xlarge" : {
+        "CPULimit" : "60",
+        "FreeStorageSpaceLimit" : "1024",
+        "ReadIOPSLimit" : "100",
+        "WriteIOPSLimit" : "100"
+      },
+      "db.m2.xlarge" : {
+        "CPULimit" : "60",
+        "FreeStorageSpaceLimit" : "1024",
+        "ReadIOPSLimit" : "100",
+        "WriteIOPSLimit" : "100"
+      },
+      "db.m2.2xlarge" : {
+        "CPULimit" : "60",
+        "FreeStorageSpaceLimit" : "1024",
+        "ReadIOPSLimit" : "100",
+        "WriteIOPSLimit" : "100"
+      },
+      "db.m2.4xlarge" : {
+        "CPULimit" : "60",
+        "FreeStorageSpaceLimit" : "1024",
+        "ReadIOPSLimit" : "100",
+        "WriteIOPSLimit" : "100"
+      }
+    }
+  },
+  
+  "Resources" : {
+
+    "MySqlSubnetGroup" : {
+      "Type" : "AWS::RDS::DBSubnetGroup",
+      "Properties" : {
+        "DBSubnetGroupDescription" : "Subnets available for the RDS DB Instance",
+        "SubnetIds" : { "Ref" : "Subnets" }
+      }
+    },
+
+    "MySqlDBInstance" : {
+      "Type": "AWS::RDS::DBInstance",
+      "Properties": {
+        "Engine"                     : "MySQL",
+        "AvailabilityZone"			 : "us-west-2a",
+        "MultiAZ"					 : "false",
+        "MasterUsername"             : { "Ref" : "MySqlUsername" },
+        "MasterUserPassword"         : { "Ref" : "MySqlPassword" },
+        "DBInstanceClass"            : { "Ref" : "MySqlClass" },
+        "AllocatedStorage"           : { "Ref" : "MySqlAllocatedStorage" },
+        "EngineVersion"              : { "Ref" : "MySqlEngineVersion" },
+        "AutoMinorVersionUpgrade"    : { "Ref" : "MySqlAutoMinorVersionUpgrade" },
+        "Port"                       : { "Ref" : "MySqlPort" },       
+        "DBSubnetGroupName"          : { "Ref" : "MySqlSubnetGroup" },
+        "VPCSecurityGroups"          : [ { "Ref" : "MySqlSG" } ],
+        "Tags" : [ { 
+          "Key" : "Name", 
+          "Value" : { "Fn::Join" : [ "", [ { "Ref" : "EnvSuffix" }, " MySql Simple Bastion Instance" ] ] }
+        } ]
+      },
+      "DeletionPolicy" : "Delete"          
+    },
+    
+    "App2DbTcp3306" : {
+      "Type" : "AWS::EC2::SecurityGroupIngress",
+      "Properties" : {
+        "GroupId" : { "Ref" : "MySqlSG" },
+        "IpProtocol" : "tcp", 
+	    "FromPort" : "3306",  
+	    "ToPort" : "3306",  
+	    "SourceSecurityGroupId" : { "Ref" : "MyAppSG" }
+      }
+    }
+       
+  },
+
+  "Outputs" : {
+    
+    "MySqlDBName" : {
+      "Value" : { "Ref" : "MySqlDBName" },
+      "Description" : "MySQL RDS DB Name"
+    },
+
+    "MySqlDBInstance" : {
+      "Value" : { "Ref" : "MySqlDBInstance" },
+      "Description" : "MySQL RDS Instance Identifier"
+    },
+            
+    "MySqlEndpointAddress" : {
+      "Value" : { "Fn::GetAtt" : [ "MySqlDBInstance", "Endpoint.Address" ]},
+      "Description" : "MySQL RDS Instance Address"
+    },
+
+    "MySqlEndpointPort" : {
+      "Value" : { "Fn::GetAtt" : [ "MySqlDBInstance", "Endpoint.Port" ]},
+      "Description" : "MySQL RDS Instance Port"
+    }
+        
+  }
+    
+}

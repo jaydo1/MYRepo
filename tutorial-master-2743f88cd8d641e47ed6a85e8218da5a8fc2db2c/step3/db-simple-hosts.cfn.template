@@ -1,0 +1,109 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+
+  "Description": "Deploy 'the' Bastion",
+
+  "Parameters": {
+
+    "KeyName" : {
+      "Description" : "EC2 Key Pair for SSH Access, you must have created these prior to running this.",
+      "Type" : "String"
+    },
+    
+    "InstanceType" : {
+      "Description" : "Instance type for node that's being created.",
+      "Type" : "String"
+    },
+    
+    "PubNet01" : {
+      "Description" : "This should be the CIDR that you want to give to the public subnet that will be created, in the format x.x.x.x/x.",
+      "Type": "String"
+    },
+    
+    "YourPublicRange" : {
+      "Description" : "Address range in CIDR format for your public address range for access to the instance.",
+      "Type" : "String"
+    },
+    
+    "PrivNet01" : {
+      "Description" : "A Private VPC subnet ID. Specified as x.x.x.x/x, if you're doing this in your own VPC be careful not to duplicate a subnet or it will fail.",
+      "Type": "String"
+    },
+    
+    "PrivNet02" : {
+      "Description" : "A Private VPC subnet ID. Specified as x.x.x.x/x. The same as above, make sure you do not duplicate this.",
+      "Type": "String"
+    },
+    
+    "SimpleBastionSG" : {
+      "Description" : "Bastion Security Group.",
+      "Type" : "String"
+    }
+    
+  },
+
+  "Mappings" : {
+    
+    "Ami" : {
+      "us-east-1"      : { "AMI" : "ami-54cf5c3d" },
+      "us-west-2"      : { "AMI" : "ami-af86c69f" },
+      "us-west-1"      : { "AMI" : "ami-b63210f3" },
+      "eu-west-1"      : { "AMI" : "ami-3c5f5748" },
+      "ap-southeast-1" : { "AMI" : "ami-ba7538e8" },
+      "ap-southeast-2" : { "AMI" : "ami-b6df4e8c" },
+      "ap-northeast-1" : { "AMI" : "ami-5d7dfa5c" },
+      "sa-east-1"      : { "AMI" : "ami-89c81394" }
+    }
+  },
+
+
+  "Resources": {
+        
+    "SimpleBastion" : {
+      "Type" : "AWS::EC2::Instance",
+      "Properties" : {
+        "KeyName" : { "Ref" : "BastionKey" },
+        "InstanceType" : { "Ref" : "BastionInstanceType" },
+        "ImageId" : { "Fn::FindInMap" : [ "Ami", { "Ref" : "AWS::Region" }, "AMI" ]},
+        "NetworkInterfaces" : [ 
+          { "DeviceIndex" : "0",
+            "AssociatePublicIpAddress" : "true",
+            "DeleteOnTermination" : "true",
+            "SubnetId" : { "Ref" : "PubNet01" },
+            "GroupSet" : [ { "Ref" : "SimpleBastionSG" } ]
+          }
+        ]
+      }
+    },
+    
+    "AllowSshFromPublic" : {
+      "Type" : "AWS::EC2::SecurityGroupIngress",
+      "Properties" : {
+        "GroupId" : { "Ref" : "SimpleBastionSG" },
+        "IpProtocol" : "tcp", 
+		"FromPort" : "22",  
+		"ToPort" : "22",  
+		"CidrIp" : { "Ref" : "LmnPublic" }
+      }
+    }
+  },
+
+
+  "Outputs" : {
+    
+	"BastionDNS" : {
+      "Value" : {
+        "Fn::GetAtt" : [ "SimpleBastion", "PublicDnsName" ]
+      },
+      "Description" : "Public DNS Name of our Bastion."
+    },
+    
+    "BastionPublicIP" : {
+      "Value" : {
+        "Fn::GetAtt" : [ "SimpleBastion", "PublicIp" ]
+      },
+      "Description" : "Public IP Name of our Bastion."
+    }
+    
+  }
+}

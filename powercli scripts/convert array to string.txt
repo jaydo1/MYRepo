@@ -1,0 +1,14 @@
+#requires -Version 2 
+$Path = "$env:temp\report.csv"
+ 
+$hash =
+@{
+  Name = 'ReplacementStrings'
+  Expression = { $_.ReplacementStrings -join ',' }
+}
+ 
+Get-EventLog -LogName system -EntryType error -Newest 5 |
+ Select-Object -Property Message, MachineName, Source, $hash |
+ Export-CSV -UseCulture -NoTypeInformation -Encoding UTF8 -Path $Path
+ 
+Invoke-Item -Path $Path 

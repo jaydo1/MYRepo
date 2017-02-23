@@ -1,0 +1,1083 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+
+  "Description": "Deploy resources required for a simple Bastion",
+
+  "Parameters": {
+    
+    "BastionKey" : {
+      "Description" : "EC2 Key Pair for Bastion Access",
+      "Type" : "String"
+    },
+    
+    "VpcId" : {
+      "Type": "String",
+      "Description" : "ID of the VPC you are deploying to."  
+    },
+    
+    "AvailabilityZone1" : {
+      "Description" : "AZ to use for VPN",
+      "Type" : "String"
+    },
+    
+    "AvailabilityZone2" : {
+      "Description" : "AZ to use for VPN",
+      "Type" : "String"
+    },
+    
+    "InternetGateway": {
+      "Description": "The ID of the Internet Gateway attached to the VPC.",
+      "Type": "String"
+    },
+    
+    "VpnGateway": {
+      "Description": "The ID of the VPN Gateway attached to the VPC that provides connectivity to LMN C1.",
+      "Type": "String"
+    },
+    
+    "PubNet01" : {
+      "Description" : "A Public VPC subnet ID.",
+      "Type": "String"
+    },
+    
+    "PubNet02" : {
+      "Description" : "A Public VPC subnet ID.",
+      "Type": "String"
+    },
+    
+    "PrivNet01" : {
+      "Description" : "A Private VPC subnet ID.",
+      "Type": "String"
+    },
+    
+    "PrivNet02" : {
+      "Description" : "A Private VPC subnet ID.",
+      "Type": "String"
+    },
+       
+    "LmnPublic" : {
+      "Description" : "Address range in CIDR format for LMN access to resources.",
+      "Type" : "String"
+    },
+    
+    "LmnPrivate" : {
+      "Description" : "Address range in CIDR format for LMN access to resources.",
+      "Type" : "String"
+    },
+    
+    "VpcCidr" : {
+      "Description" : "What is the VpcCidr.",
+      "Type": "String"
+    },
+    
+    "ProjectName": {
+      "Description": "The generic Stack project name",
+      "Type": "String"
+    },
+    
+    "EnvSuffix": {
+      "Description": "The key of the template for the EB resources and application substack",
+      "Type": "String"
+    },
+    
+    "NatNodeInstanceType" : {
+      "Description" : "Instance type for NAT nodes.",
+      "Type" : "String",
+      "Default" : "t1.micro",
+      "AllowedValues" : [ 
+        "t1.micro",
+        "m3.medium",
+        "m3.xlarge"
+      ],
+      "ConstraintDescription" : "must be a valid EC2 instance type."
+    },
+    
+    "PingTimeout" : {
+      "Description" : "The number of seconds to wait for each ping response before determining that the ping has failed",
+      "Type" : "String",
+      "Default" : "1"
+    },
+    
+    "WaitBetweenPings" : {
+      "Description" : "The number of seconds to wait between health checks",
+      "Type" : "String",
+      "Default" : "2"
+    },
+    
+    "WaitForInstanceStop" : {
+      "Description" : "The number of seconds to wait for alternate NAT Node to stop before attempting to stop it again",
+      "Type" : "String",
+      "Default" : "60"
+    },
+    
+    "WaitForInstanceStart" : {
+      "Description" : "The number of seconds to wait for alternate NAT Node to restart before resuming health checks again",
+      "Type" : "String",
+      "Default" : "300"
+    },
+    
+    "NumberOfPings" : {
+      "Description" : "The number of times the health check will ping the alternate NAT Node",
+      "Type" : "String",
+      "Default" : "3"
+    }
+    
+  },
+  
+  "Mappings" : {
+    
+    "NatAmi" : {
+      "us-east-1"      : { "AMI" : "ami-54cf5c3d" },
+      "us-west-2"      : { "AMI" : "ami-49691279" },
+      "us-west-1"      : { "AMI" : "ami-b63210f3" },
+      "eu-west-1"      : { "AMI" : "ami-3c5f5748" },
+      "ap-southeast-1" : { "AMI" : "ami-ba7538e8" },
+      "ap-southeast-2" : { "AMI" : "ami-b6df4e8c" },
+      "ap-northeast-1" : { "AMI" : "ami-5d7dfa5c" },
+      "sa-east-1"      : { "AMI" : "ami-89c81394" }
+    }
+  
+  },
+
+  "Resources": {
+    
+    "NatRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [ {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": [ "ec2.amazonaws.com" ]
+            },
+            "Action": [ "sts:AssumeRole" ]
+          } ]
+        },
+        "Path": "/",
+        "Policies": [
+          {
+            "PolicyName": "NAT_Takeover",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [ {
+                "Effect": "Allow",
+                "Action": [
+                  "ec2:DescribeInstances",
+                  "ec2:DescribeRouteTables",
+                  "ec2:CreateRoute",
+                  "ec2:ReplaceRoute",
+                  "ec2:StartInstances",
+                  "ec2:StopInstances"
+                ],
+                "Resource": "*"
+              } ]
+            }
+          }
+        ]
+      }
+    },
+    
+    "NatRoleProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Path": "/",
+        "Roles": [ {
+          "Ref": "NatRole"
+        } ]
+      }
+    },
+    
+    "PubSubnet1" : {
+      "Type" : "AWS::EC2::Subnet",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VpcId" },
+        "AvailabilityZone" : { "Ref" : "AvailabilityZone1" },
+        "CidrBlock" : { "Ref" : "PubNet01" },
+        "Tags" : [
+          { "Key" : "Application", "Value" : { "Ref" : "AWS::StackName" } },
+          { "Key" : "Network", "Value" : "Public" },
+          { "Key" : "Name", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "EnvSuffix" }, " Public Subnet 1" ] ] } }
+        ]
+      }
+    },
+    
+    "PubSubnet2" : {
+      "Type" : "AWS::EC2::Subnet",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VpcId" },
+        "AvailabilityZone" : { "Ref" : "AvailabilityZone2" },
+        "CidrBlock" : { "Ref" : "PubNet02" },
+        "Tags" : [
+          { "Key" : "Application", "Value" : { "Ref" : "AWS::StackName" } },
+          { "Key" : "Network", "Value" : "Public" },
+          { "Key" : "Name", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "EnvSuffix" }, " Public Subnet 2" ] ] } }
+        ]
+      }
+    },
+    
+    "PrivateSubnet1" : {
+      "Type" : "AWS::EC2::Subnet",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VpcId" },
+        "AvailabilityZone" : { "Ref" : "AvailabilityZone1" },
+        "CidrBlock" : { "Ref" : "PrivNet02" },
+        "Tags" : [
+          { "Key" : "Application", "Value" : { "Ref" : "AWS::StackName" } },
+          { "Key" : "Network", "Value" : "Private" },
+          { "Key" : "Name", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "EnvSuffix" }, " Private Subnet 1" ] ] } }
+        ]
+      }
+    },
+    
+    "PrivateSubnet2" : {
+      "Type" : "AWS::EC2::Subnet",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VpcId" },
+        "AvailabilityZone" : { "Ref" : "AvailabilityZone2" },
+        "CidrBlock" : { "Ref" : "PrivNet01" },
+        "Tags" : [
+          { "Key" : "Application", "Value" : { "Ref" : "AWS::StackName" } },
+          { "Key" : "Network", "Value" : "Private" },
+          { "Key" : "Name", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "EnvSuffix" }, " Private Subnet 2" ] ] } }
+        ]
+      }
+    },
+    
+    "PublicRouteTable" : {
+      "Type" : "AWS::EC2::RouteTable",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VpcId" },
+        "Tags" : [
+          { "Key" : "Application", "Value" : { "Ref" : "AWS::StackName" } },
+          { "Key" : "Network", "Value" : "Public" },
+          { "Key" : "Name", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "EnvSuffix" }, " Public Route Table" ] ] } }
+        ]
+      }
+    },
+    
+    "PrivateRouteTable1" : {
+      "Type" : "AWS::EC2::RouteTable",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VpcId" },
+        "Tags" : [
+          { "Key" : "Application", "Value" : { "Ref" : "AWS::StackName" } },
+          { "Key" : "Network", "Value" : "Private" },
+          { "Key" : "Name", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "EnvSuffix" }, " PVR Table 1" ] ] } }
+        ]
+      }
+    },
+    
+    "PrivateRouteTable2" : {
+      "Type" : "AWS::EC2::RouteTable",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VpcId" },
+        "Tags" : [
+          { "Key" : "Application", "Value" : { "Ref" : "AWS::StackName" } },
+          { "Key" : "Network", "Value" : "Private" },
+          { "Key" : "Name", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "EnvSuffix" }, " PVR Table 2" ] ] } }
+        ]
+      }
+    },
+    
+    "PublicRoute1" : {
+      "Type" : "AWS::EC2::Route",
+      "Properties" : {
+        "RouteTableId" : { "Ref" : "PublicRouteTable" },
+        "DestinationCidrBlock" : "0.0.0.0/0",
+        "GatewayId" : { "Ref" : "InternetGateway" }
+      }
+    },
+    
+    "PrivateRouteTable1Route1" : {
+      "Type" : "AWS::EC2::Route",
+      "Properties" : {
+        "RouteTableId" : { "Ref" : "PrivateRouteTable1" },
+        "DestinationCidrBlock" : "10.28.0.0/16",
+        "GatewayId" : { "Ref" : "VpnGateway" }
+      }
+    },
+    
+    "PrivateRouteTable2Route1" : {
+      "Type" : "AWS::EC2::Route",
+      "Properties" : {
+        "RouteTableId" : { "Ref" : "PrivateRouteTable2" },
+        "DestinationCidrBlock" : "10.28.0.0/16",
+        "GatewayId" : { "Ref" : "VpnGateway" }
+      }
+    },
+    
+    "PrivateRouteTable1Route2" : {
+      "Type" : "AWS::EC2::Route",
+      "Properties" : {
+        "RouteTableId" : { "Ref" : "PrivateRouteTable1" },
+        "DestinationCidrBlock" : "0.0.0.0/0",
+        "InstanceId" : { "Ref" : "NatInstance1" }
+      }
+    },
+
+    "PrivateRouteTable2Route2" : {
+      "Type" : "AWS::EC2::Route",
+      "Properties" : {
+        "RouteTableId" : { "Ref" : "PrivateRouteTable2" },
+        "DestinationCidrBlock" : "0.0.0.0/0",
+        "InstanceId" : { "Ref" : "NatInstance2" }
+      }
+    },
+    
+    "PubSubnet1RTAssoc" : {
+      "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties" : {
+        "SubnetId" : { "Ref" : "PubSubnet1" },
+        "RouteTableId" : { "Ref" : "PublicRouteTable" }
+      }
+    },
+    
+    "PubSubnet2RTAssoc" : {
+      "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties" : {
+        "SubnetId" : { "Ref" : "PubSubnet2" },
+        "RouteTableId" : { "Ref" : "PublicRouteTable" }
+      }
+    },
+    
+    "PriSubnet1RTAssoc" : {
+      "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties" : {
+        "SubnetId" : { "Ref" : "PrivateSubnet1" },
+        "RouteTableId" : { "Ref" : "PrivateRouteTable1" }
+      }
+    },
+    
+    "PriSubnet2RTAssoc" : {
+      "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties" : {
+        "SubnetId" : { "Ref" : "PrivateSubnet2" },
+        "RouteTableId" : { "Ref" : "PrivateRouteTable2" }
+      }
+    },
+    
+    "PublicNetworkAcl" : {
+      "Type" : "AWS::EC2::NetworkAcl",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VpcId" },
+        "Tags" : [         
+          { "Key" : "Application", "Value" : { "Ref" : "AWS::StackName" } },
+          { "Key" : "Network", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "AWS::StackName" }, " Public Network Acl" ] ] } },
+          { "Key" : "Name", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "EnvSuffix" }, " Public NACL" ] ] } }
+        ]
+      }
+    },
+    
+    "PrivateNetworkAcl" : {
+      "Type" : "AWS::EC2::NetworkAcl",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VpcId" },
+        "Tags" : [         
+          { "Key" : "Application", "Value" : { "Ref" : "AWS::StackName" } },
+          { "Key" : "Network", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "AWS::StackName" }, " Private Network Acl" ] ] } },
+          { "Key" : "Name", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "EnvSuffix" }, " Private Public NACL" ] ] } }
+        ]
+      }
+    },
+    
+    "LmnPublicTcp22ToPublic" : {
+      "Type" : "AWS::EC2::NetworkAclEntry",
+      "Properties" : {
+        "CidrBlock" : { "Ref" : "LmnPublic" },
+        "NetworkAclId" : { "Ref" : "PublicNetworkAcl" },
+        "Protocol" : "6",
+        "RuleAction" : "allow",
+        "RuleNumber" : "10",
+        "PortRange" : { "From" : "22", "To" : "22" }
+      }
+    },
+
+    "PermitTcpCidrIpReplies" : {
+      "Type" : "AWS::EC2::NetworkAclEntry",
+      "Properties" : {
+        "CidrBlock" : "0.0.0.0/0",
+        "NetworkAclId" : { "Ref" : "PublicNetworkAcl" },
+        "Protocol" : "6",
+        "RuleAction" : "allow",
+        "RuleNumber" : "20",
+        "PortRange" : { "From" : "1024", "To" : "65535" }
+      }
+    },
+
+    "PermitUdpCidrIpReplies" : {
+      "Type" : "AWS::EC2::NetworkAclEntry",
+      "Properties" : {
+        "CidrBlock" : "0.0.0.0/0",
+        "NetworkAclId" : { "Ref" : "PublicNetworkAcl" },
+        "Protocol" : "17",
+        "RuleAction" : "allow",
+        "RuleNumber" : "21",
+        "PortRange" : { "From" : "1024", "To" : "65535" }
+      }
+    },
+    
+    "PermitHttpToNAT" : {
+      "Type" : "AWS::EC2::NetworkAclEntry",
+      "Properties" : {
+        "CidrBlock" : { "Ref" : "VpcCidr" },
+        "NetworkAclId" : { "Ref" : "PublicNetworkAcl" },
+        "Protocol" : "6",
+        "RuleAction" : "allow",
+        "RuleNumber" : "22",
+        "PortRange" : { "From" : "80", "To" : "80" }
+      }
+    },
+    
+    "PermitHttpsToNAT" : {
+      "Type" : "AWS::EC2::NetworkAclEntry",
+      "Properties" : {
+        "CidrBlock" : "0.0.0.0/0",
+        "NetworkAclId" : { "Ref" : "PublicNetworkAcl" },
+        "Protocol" : "6",
+        "RuleAction" : "allow",
+        "RuleNumber" : "23",
+        "PortRange" : { "From" : "443", "To" : "443" }
+      }
+    },
+    
+    "DefaultPublicOutboundNAclEntry" : {
+      "Type" : "AWS::EC2::NetworkAclEntry",
+      "Properties" : {
+        "CidrBlock" : "0.0.0.0/0",
+        "Egress" : "true",
+        "NetworkAclId" : { "Ref" : "PublicNetworkAcl" },
+        "Protocol" : "-1",
+        "RuleAction" : "allow",
+        "RuleNumber" : "100"
+      }
+    },
+    
+    "DefaultPrivateInboundAclEntry" : {
+      "Type" : "AWS::EC2::NetworkAclEntry",
+      "Properties" : {
+       "CidrBlock" : "0.0.0.0/0",
+        "NetworkAclId" : { "Ref" : "PrivateNetworkAcl" },
+        "Protocol" : "-1",
+        "RuleAction" : "allow",
+        "RuleNumber" : "101"
+      }
+    },
+    
+    "DefaultPrivateOutboundNAclEntry" : {
+      "Type" : "AWS::EC2::NetworkAclEntry",
+      "Properties" : {
+        "CidrBlock" : "0.0.0.0/0",
+        "Egress" : "true",
+        "NetworkAclId" : { "Ref" : "PrivateNetworkAcl" },
+        "Protocol" : "-1",
+        "RuleAction" : "allow",
+        "RuleNumber" : "100"
+      }
+    },
+    
+    "PubSubnet1toPublicNAclAssoc" : {
+      "Type" : "AWS::EC2::SubnetNetworkAclAssociation",
+	  "Properties" : {
+   		"SubnetId" : { "Ref" : "PubSubnet1" },
+   		"NetworkAclId" : { "Ref" : "PublicNetworkAcl" }
+	  }
+    }, 
+    
+    "PubSubnet2toPublicNAclAssoc" : {
+      "Type" : "AWS::EC2::SubnetNetworkAclAssociation",
+	  "Properties" : {
+   		"SubnetId" : { "Ref" : "PubSubnet2" },
+   		"NetworkAclId" : { "Ref" : "PublicNetworkAcl" }
+	  }
+    },
+    
+    "PrivateSubnet1toPrivateNAclAssoc" : {
+      "Type" : "AWS::EC2::SubnetNetworkAclAssociation",
+	  "Properties" : {
+   		"SubnetId" : { "Ref" : "PrivateSubnet1" },
+   		"NetworkAclId" : { "Ref" : "PrivateNetworkAcl" }
+	  }
+    },
+    
+    "PrivateSubnet2toPrivateNAclAssoc" : {
+      "Type" : "AWS::EC2::SubnetNetworkAclAssociation",
+	  "Properties" : {
+   		"SubnetId" : { "Ref" : "PrivateSubnet2" },
+   		"NetworkAclId" : { "Ref" : "PrivateNetworkAcl" }
+	  }
+    },
+    
+    "SimpleBastionSG": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "SG that public bastions launch into.",
+        "VpcId": { "Ref": "VpcId" },
+        "Tags" : [
+          { "Key" : "Application", "Value" : { "Ref" : "AWS::StackName" } },
+          { "Key" : "Network", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "AWS::StackName" }, "Bastion SG" ] ] } },
+          { "Key" : "Name", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "EnvSuffix" }, " Bastion SG" ] ] } }
+        ]        
+      }
+    },
+    
+    "MySqlSG": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "SG that MySql is launched into.",
+        "VpcId": { "Ref": "VpcId" },
+        "Tags" : [
+          { "Key" : "Application", "Value" : { "Ref" : "AWS::StackName" } },
+          { "Key" : "Network", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "AWS::StackName" }, "MySql SG" ] ] } },
+          { "Key" : "Name", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "EnvSuffix" }, " MySql SG" ] ] } }
+        ]        
+      }
+    },
+    
+    "MyAppSG": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "SG that the App is launched into.",
+        "VpcId": { "Ref": "VpcId" },
+        "Tags" : [
+          { "Key" : "Application", "Value" : { "Ref" : "AWS::StackName" } },
+          { "Key" : "Network", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "AWS::StackName" }, "App SG" ] ] } },
+          { "Key" : "Name", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "EnvSuffix" }, " App SG" ] ] } }
+        ]        
+      }
+    },
+    
+    "NatSecurityGroup" : {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "Properties" : {
+        "GroupDescription" : "Rules for allowing access to HA Nodes",
+        "VpcId" : { "Ref" : "VpcId" },
+        "SecurityGroupIngress" : [
+          { "IpProtocol" : "tcp", "FromPort" : "22",  "ToPort" : "22",    "CidrIp" : { "Ref" : "LmnPublic"  } },
+          { "IpProtocol" : "tcp", "FromPort" : "22",  "ToPort" : "22",    "CidrIp" : { "Ref" : "LmnPrivate" } },
+          { "IpProtocol" : "tcp", "FromPort" : "80",  "ToPort" : "80",    "CidrIp" : { "Ref" : "VpcCidr"    } },
+          { "IpProtocol" : "tcp", "FromPort" : "443", "ToPort" : "443",   "CidrIp" : { "Ref" : "VpcCidr"    } }
+        ],
+        "SecurityGroupEgress" : [
+          { "IpProtocol" : "-1",  "FromPort" : "0",   "ToPort" : "65535", "CidrIp" : "0.0.0.0/0"              }
+        ],
+        "Tags" : [
+          { "Key" : "Application", "Value" : { "Ref" : "AWS::StackName" } },
+          { "Key" : "Network", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "AWS::StackName" }, "NAT SG" ] ] } },
+          { "Key" : "Name", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "EnvSuffix" }, " NAT SG" ] ] } }
+        ]
+      }
+    },
+
+    "InNatSgNatSgIcmp" : {
+      "Type" : "AWS::EC2::SecurityGroupIngress",
+      "Properties" : {
+        "GroupId" : { "Ref" : "NatSecurityGroup" },
+        "IpProtocol" : "icmp", 
+		"FromPort" : "-1",  
+		"ToPort" : "-1",  
+		"SourceSecurityGroupId" : { "Ref" : "NatSecurityGroup" }
+      }
+    },
+    
+    "NatInstance1" : {
+      "Type" : "AWS::EC2::Instance",    
+        "Metadata" : {
+        "AWS::CloudFormation::Init" : {
+          "comment" : "Create NAT #1",
+          "configSets" : {
+            "ascending" : [ "updaterepo" , "configurenat", "setupnatmonitor" ],
+            "descending" : [ "setupnatmonitor", "configurenat" , "updaterepo" ]
+          },
+          "updaterepo" : {
+            "packages" : {
+              "yum" : {
+                "yum-updatesd"      : [],
+                "yum-cron"          : [],
+                "yum-cron-security" : []
+              }
+            },
+            "commands" : {
+              "yum-cron-config" : {
+                "command" : "sed -i 's/^update_cmd = .*$/update_cmd = security/g;s/^apply_updates = .*$/apply_updates = yes/g' /etc/yum/yum-cron.conf"
+              }, 
+              "yumupdate" : {
+                "command" : "yum -y update"
+              }
+            }            
+          },
+          "configurenat" : {
+            "commands" : {
+              "configureiptables" : {
+                "command" : "/sbin/iptables -t nat -A POSTROUTING -o eth0 -s 0.0.0.0/0 -j MASQUERADE; /sbin/iptables-save > /etc/sysconfig/iptables"
+              },
+              "configureipforward" : {
+                "command" : "echo 1 > /proc/sys/net/ipv4/ip_forward && echo 0 > /proc/sys/net/ipv4/conf/eth0/send_redirects"
+              }
+            },         
+            "files" : {
+              "/etc/cfn/cfn-hup.conf" : {
+                "content" : { "Fn::Join" : ["", [
+                  "[main]\n",
+                  "stack=", { "Ref" : "AWS::StackName" }, "\n",
+                  "region=", { "Ref" : "AWS::Region" }, "\n",
+                  "interval=1\n"
+                ]]},
+                "mode"    : "000400",
+                "owner"   : "root",
+                "group"   : "root"
+              },              
+              "/etc/cfn/hooks.d/cfn-auto-reloader.conf" : {
+                "content": { "Fn::Join" : ["", [
+                  "[cfn-auto-reloader-hook]\n",
+                  "triggers=post.update\n",
+                  "path=Resources.NatInstance1.Metadata.AWS::CloudFormation::Init\n",
+                  "action=/opt/aws/bin/cfn-init -c ascending -v -s ",
+                    { "Ref" : "AWS::StackId" }, " -r NatInstance1 ",
+                    " --region ", { "Ref" : "AWS::Region" }, "\n",
+                  "runas=root\n"
+                ]]}
+              },
+              "/etc/sysctl.d/nat.conf" : {
+                "content" : { "Fn::Join" : ["", [
+	  		      "net.ipv4.ip_forward = 1\n",
+	  		      "net.ipv4.conf.eth0.send_redirects = 0\n"
+                ]]},
+                "mode"    : "000400",
+                "owner"   : "root",
+                "group"   : "root"
+              },                            
+              "/root/nat_monitor.sh" : {
+                "content" : { "Fn::Join" : ["", [
+                  "#!/bin/sh\n",
+                  "# This script will monitor another NAT instance and take over its routes\n",
+                  "# if communication with the other instance fails\n",
+                  "\n",
+                  "# NAT instance variables\n",
+                  "# Other instance's IP to ping and route to grab if other node goes down\n",
+                  "NAT_ID=\n",
+                  "NAT_RT_ID", { "Ref" : "PrivateRouteTable2" }, "\n",
+                  "\n",
+                  "# My route to grab when I come back up\n",
+                  "My_RT_ID=", { "Ref" : "PrivateRouteTable1" }, "\n",
+                  "\n",
+                  "# Specify the EC2 region that this will be running in (e.g. https://ec2.us-east-1.amazonaws.com)\n",
+                  "EC2_URL=https://ec2.", { "Ref" : "AWS::Region" }, ".amazonaws.com\n",
+                  "\n",
+                  "# Health Check variables\n",
+                  "Num_Pings=", { "Ref" : "NumberOfPings" }, "\n",
+                  "Ping_Timeout=", { "Ref" : "PingTimeout" }, "\n",
+                  "Wait_Between_Pings=", { "Ref" : "WaitBetweenPings" }, "\n",
+                  "Wait_for_Instance_Stop=", { "Ref" : "WaitForInstanceStop" }, "\n",
+                  "Wait_for_Instance_Start=", { "Ref" : "WaitForInstanceStart" }, "\n",
+                  "\n",
+                  "# Run aws-apitools-common.sh to set up default environment variables and to\n",
+                  "# leverage AWS security credentials provided by EC2 roles\n",
+                  ". /etc/profile.d/aws-apitools-common.sh\n",
+                  "\n",
+                  "# Determine the NAT instance private IP so we can ping the other NAT instance, take over\n",
+                  "# its route, and reboot it.  Requires EC2 DescribeInstances, ReplaceRoute, and Start/RebootInstances\n",
+                  "# permissions.\n",
+                  "\n",
+                  "# Get this instance's ID\n",
+                  "Instance_ID=`/usr/bin/curl --silent http://169.254.169.254/latest/meta-data/instance-id`\n",
+                  "# Get the other NAT instance's IP\n",
+                  "NAT_IP=`/opt/aws/bin/ec2-describe-instances $NAT_ID -U $EC2_URL | grep PRIVATEIPADDRESS -m 1 | awk '{print $2;}'`\n",
+                  "\n",
+                  "echo `date` \"-- Starting NAT monitor\"\n",
+                  "echo `date` \"-- Adding this instance to $My_RT_ID default route on start\"\n",
+                  "/opt/aws/bin/ec2-replace-route $My_RT_ID -r 0.0.0.0/0 -i $Instance_ID -U $EC2_URL\n",
+                  "# If replace-route failed, then the route might not exist and may need to be created instead\n",
+                  "if [ \"$?\" != \"0\" ]; then\n",
+                  "   /opt/aws/bin/ec2-create-route $My_RT_ID -r 0.0.0.0/0 -i $Instance_ID -U $EC2_URL\n",
+                  "fi\n",
+                  "\n",
+                  "while [ . ]; do\n",
+                  "  # Check health of other NAT instance\n",
+                  "  pingresult=`ping -c $Num_Pings -W $Ping_Timeout $NAT_IP | grep time= | wc -l`\n",
+                  "  # Check to see if any of the health checks succeeded, if not\n",
+                  "  if [ \"$pingresult\" == \"0\" ]; then\n",
+                  "    # Set HEALTHY variables to unhealthy (0)\n",
+                  "    ROUTE_HEALTHY=0\n",
+                  "    NAT_HEALTHY=0\n",
+                  "    STOPPING_NAT=0\n",
+                  "    while [ \"$NAT_HEALTHY\" == \"0\" ]; do\n",
+                  "      # NAT instance is unhealthy, loop while we try to fix it\n",
+                  "      if [ \"$ROUTE_HEALTHY\" == \"0\" ]; then\n",
+                  "        echo `date` \"-- Other NAT heartbeat failed, taking over $NAT_RT_ID default route\"\n",
+                  "        /opt/aws/bin/ec2-replace-route $NAT_RT_ID -r 0.0.0.0/0 -i $Instance_ID -U $EC2_URL\n",
+                  "        ROUTE_HEALTHY=1\n",
+                  "      fi\n",
+                  "      # Check NAT state to see if we should stop it or start it again\n",
+                  "      NAT_STATE=`/opt/aws/bin/ec2-describe-instances $NAT_ID -U $EC2_URL | grep INSTANCE | awk '{print $5;}'`\n",
+                  "      if [ \"$NAT_STATE\" == \"stopped\" ]; then\n",
+                  "        echo `date` \"-- Other NAT instance stopped, starting it back up\"\n",
+                  "        /opt/aws/bin/ec2-start-instances $NAT_ID -U $EC2_URL\n",
+                  "        NAT_HEALTHY=1\n",
+                  "        sleep $Wait_for_Instance_Start\n",
+                  "      else\n",
+                  "        if [ \"$STOPPING_NAT\" == \"0\" ]; then\n",
+                  "        echo `date` \"-- Other NAT instance $NAT_STATE, attempting to stop for reboot\"\n",
+                  "        /opt/aws/bin/ec2-stop-instances $NAT_ID -U $EC2_URL\n",
+                  "        STOPPING_NAT=1\n",
+                  "      fi\n",
+                  "        sleep $Wait_for_Instance_Stop\n",
+                  "      fi\n",
+                  "    done\n",
+                  "  else\n",
+                  "    sleep $Wait_Between_Pings\n",
+                  "  fi\n",
+                  "done\n"
+                  ]]},
+                "mode"  : "000550",
+                "owner" : "root",
+                "group" : "root"
+              },
+              "/root/nat_monitor_setup.sh" : {
+                "content" : { "Fn::Join" : ["", [
+                  "/usr/bin/pkill nat_monitor\n",
+                  "while [ \"$NAT_ID\" == \"\" ]; do\n",
+                  "  sleep 60\n",
+                  "  NAT_ID=`/opt/aws/bin/ec2-describe-route-tables ", { "Ref" : "PrivateRouteTable2" },
+                  " -U https://ec2.", { "Ref" : "AWS::Region" }, ".amazonaws.com | grep 0.0.0.0/0 | awk '{print $2;}'`\n",
+                  "done\n",
+                  "/bin/sed -i 's/NAT_ID=/NAT_ID=$NAT_ID/g' /root/nat_monitor.sh\n"              
+                  ]]},
+                "mode"  : "000550",
+                "owner" : "root",
+                "group" : "root"
+              }
+            },
+            "services" : {             
+              "sysvinit" : {
+                "cfn-hup" : {
+                  "enabled" : "true",
+                  "ensureRunning" : "true",
+                  "files" : [ "/etc/cfn/cfn-hup.conf", "/etc/cfn/hooks.d/cfn-auto-reloader.conf" ]
+                },
+                "yum-updatesd" : {
+                  "enabled" : "true",
+                  "ensureRunning" : "true"
+                },
+                "yum-cron" : {
+                  "enabled" : "true",
+                  "ensureRunning" : "true"
+                }                
+              }
+            }
+          },
+          "setupnatmonitor" : {
+            "commands" : {
+              "setupnatmonitor1" : {
+                "command" : "/root/nat_monitor_setup.sh"
+              }
+            }
+          }         
+        }
+      },
+      "Properties" : {
+        "KeyName" : { "Ref" : "BastionKey" },
+        "InstanceType" : { "Ref" : "NatNodeInstanceType" },
+        "IamInstanceProfile" : { "Ref" : "NatRoleProfile" },
+        "ImageId" : { "Fn::FindInMap" : [ "NatAmi", { "Ref" : "AWS::Region" }, "AMI" ]},
+        "NetworkInterfaces" : [{
+          "GroupSet"                 : [{ "Ref" : "NatSecurityGroup" }],
+          "AssociatePublicIpAddress" : "true",
+          "DeviceIndex"              : "0",
+          "DeleteOnTermination"      : "true",
+          "SubnetId"                 : { "Ref" : "PubSubnet1" }
+        }],
+        "SourceDestCheck" : "false",           
+        "Tags" : [
+          { "Key" : "Name", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "EnvSuffix" }, " NatInstance1" ] ] } }
+        ],  
+   		"UserData"       : { "Fn::Base64" : { "Fn::Join" : ["", [ 
+          "#!/bin/bash -v\n",
+          "exec > >(logger -t user-data -s) 2>&1\n",
+          
+          "# run cfn-init\n",
+          "/opt/aws/bin/cfn-init -c ascending -v -s ", { "Ref" : "AWS::StackId" }, " -r NatInstance1 ",
+          "    --region ", { "Ref" : "AWS::Region" },"\n",
+
+          "/root/nat_monitor.sh >> /tmp/nat_monitor.log &\n",
+                                                               
+          "# Log the last command to ensure the end of the script was reached\n",
+          "logger -t cfn-init \"The UserData script has finished!\"\n"          
+        ] ] } }
+      }
+    },  
+            
+    "NatInstance2" : {
+      "Type" : "AWS::EC2::Instance",    
+        "Metadata" : {
+        "AWS::CloudFormation::Init" : {
+          "comment" : "Create NAT #2",
+          "configSets" : {
+            "ascending" : [ "updaterepo" , "configurenat", "setupnatmonitor" ],
+            "descending" : [ "setupnatmonitor", "configurenat" , "updaterepo" ]
+          },
+          "updaterepo" : {
+            "commands" : {
+              "yumupdate" : {
+                "command" : "yum -y update"
+              }
+            },
+            "packages" : {
+              "yum" : {
+                "yum-updatesd" : []
+              }
+            }                       
+          },
+          "configurenat" : {
+            "commands" : {
+              "configureiptables" : {
+                "command" : "/sbin/iptables -t nat -A POSTROUTING -o eth0 -s 0.0.0.0/0 -j MASQUERADE; /sbin/iptables-save > /etc/sysconfig/iptables"
+              },
+              "configureipforward" : {
+                "command" : "echo 1 > /proc/sys/net/ipv4/ip_forward && echo 0 > /proc/sys/net/ipv4/conf/eth0/send_redirects"
+              }
+            },
+            "files" : {
+              "/etc/cfn/cfn-hup.conf" : {
+                "content" : { "Fn::Join" : ["", [
+                  "[main]\n",
+                  "stack=", { "Ref" : "AWS::StackName" }, "\n",
+                  "region=", { "Ref" : "AWS::Region" }, "\n",
+                  "interval=1\n"
+                ]]},
+                "mode"    : "000400",
+                "owner"   : "root",
+                "group"   : "root"
+              },              
+              "/etc/cfn/hooks.d/cfn-auto-reloader.conf" : {
+                "content": { "Fn::Join" : ["", [
+                  "[cfn-auto-reloader-hook]\n",
+                  "triggers=post.update\n",
+                  "path=Resources.NatInstance2.Metadata.AWS::CloudFormation::Init\n",
+                  "action=/opt/aws/bin/cfn-init -c ascending -v -s ",
+                    { "Ref" : "AWS::StackId" }, " -r NatInstance2 ",
+                    " --region ", { "Ref" : "AWS::Region" }, "\n",
+                  "runas=root\n"
+                ]]}
+              },
+              "/etc/sysctl.d/nat.conf" : {
+                "content" : { "Fn::Join" : ["", [
+	  		      "net.ipv4.ip_forward = 1\n",
+	  		      "net.ipv4.conf.eth0.send_redirects = 0\n"
+                ]]},
+                "mode"    : "000400",
+                "owner"   : "root",
+                "group"   : "root"
+              },                            
+              "/root/nat_monitor.sh" : {
+                "content" : { "Fn::Join" : ["", [
+                  "#!/bin/sh\n",
+                  "# This script will monitor another NAT instance and take over its routes\n",
+                  "# if communication with the other instance fails\n",
+                  "\n",
+                  "# NAT instance variables\n",
+                  "# Other instance's IP to ping and route to grab if other node goes down\n",
+                  "NAT_ID=\n",
+                  "NAT_RT_ID=", { "Ref" : "PrivateRouteTable1" }, "\n",
+                  "\n",
+                  "# My route to grab when I come back up\n",
+                  "My_RT_ID=", { "Ref" : "PrivateRouteTable2" }, "\n",
+                  "\n",
+                  "# Specify the EC2 region that this will be running in (e.g. https://ec2.us-east-1.amazonaws.com)\n",
+                  "EC2_URL=https://ec2.", { "Ref" : "AWS::Region" }, ".amazonaws.com\n",
+                  "\n",
+                  "# Health Check variables\n",
+                  "Num_Pings=", { "Ref" : "NumberOfPings" }, "\n",
+                  "Ping_Timeout=", { "Ref" : "PingTimeout" }, "\n",
+                  "Wait_Between_Pings=", { "Ref" : "WaitBetweenPings" }, "\n",
+                  "Wait_for_Instance_Stop=", { "Ref" : "WaitForInstanceStop" }, "\n",
+                  "Wait_for_Instance_Start=", { "Ref" : "WaitForInstanceStart" }, "\n",
+                  "\n",
+                  "# Run aws-apitools-common.sh to set up default environment variables and to\n",
+                  "# leverage AWS security credentials provided by EC2 roles\n",
+                  ". /etc/profile.d/aws-apitools-common.sh\n",
+                  "\n",
+                  "# Determine the NAT instance private IP so we can ping the other NAT instance, take over\n",
+                  "# its route, and reboot it.  Requires EC2 DescribeInstances, ReplaceRoute, and Start/RebootInstances\n",
+                  "# permissions.\n",
+                  "\n",
+                  "# Get this instance's ID\n",
+                  "Instance_ID=`/usr/bin/curl --silent http://169.254.169.254/latest/meta-data/instance-id`\n",
+                  "# Get the other NAT instance's IP\n",
+                  "NAT_IP=`/opt/aws/bin/ec2-describe-instances $NAT_ID -U $EC2_URL | grep PRIVATEIPADDRESS -m 1 | awk '{print $2;}'`\n",
+                  "\n",
+                  "echo `date` \"-- Starting NAT monitor\"\n",
+                  "echo `date` \"-- Adding this instance to $My_RT_ID default route on start\"\n",
+                  "/opt/aws/bin/ec2-replace-route $My_RT_ID -r 0.0.0.0/0 -i $Instance_ID -U $EC2_URL\n",
+                  "# If replace-route failed, then the route might not exist and may need to be created instead\n",
+                  "if [ \"$?\" != \"0\" ]; then\n",
+                  "   /opt/aws/bin/ec2-create-route $My_RT_ID -r 0.0.0.0/0 -i $Instance_ID -U $EC2_URL\n",
+                  "fi\n",
+                  "\n",
+                  "while [ . ]; do\n",
+                  "  # Check health of other NAT instance\n",
+                  "  pingresult=`ping -c $Num_Pings -W $Ping_Timeout $NAT_IP | grep time= | wc -l`\n",
+                  "  # Check to see if any of the health checks succeeded, if not\n",
+                  "  if [ \"$pingresult\" == \"0\" ]; then\n",
+                  "    # Set HEALTHY variables to unhealthy (0)\n",
+                  "    ROUTE_HEALTHY=0\n",
+                  "    NAT_HEALTHY=0\n",
+                  "    STOPPING_NAT=0\n",
+                  "    while [ \"$NAT_HEALTHY\" == \"0\" ]; do\n",
+                  "      # NAT instance is unhealthy, loop while we try to fix it\n",
+                  "      if [ \"$ROUTE_HEALTHY\" == \"0\" ]; then\n",
+                  "        echo `date` \"-- Other NAT heartbeat failed, taking over $NAT_RT_ID default route\"\n",
+                  "        /opt/aws/bin/ec2-replace-route $NAT_RT_ID -r 0.0.0.0/0 -i $Instance_ID -U $EC2_URL\n",
+                  "        ROUTE_HEALTHY=1\n",
+                  "      fi\n",
+                  "      # Check NAT state to see if we should stop it or start it again\n",
+                  "      NAT_STATE=`/opt/aws/bin/ec2-describe-instances $NAT_ID -U $EC2_URL | grep INSTANCE | awk '{print $5;}'`\n",
+                  "      if [ \"$NAT_STATE\" == \"stopped\" ]; then\n",
+                  "        echo `date` \"-- Other NAT instance stopped, starting it back up\"\n",
+                  "        /opt/aws/bin/ec2-start-instances $NAT_ID -U $EC2_URL\n",
+                  "        NAT_HEALTHY=1\n",
+                  "        sleep $Wait_for_Instance_Start\n",
+                  "      else\n",
+                  "        if [ \"$STOPPING_NAT\" == \"0\" ]; then\n",
+                  "        echo `date` \"-- Other NAT instance $NAT_STATE, attempting to stop for reboot\"\n",
+                  "        /opt/aws/bin/ec2-stop-instances $NAT_ID -U $EC2_URL\n",
+                  "        STOPPING_NAT=1\n",
+                  "      fi\n",
+                  "        sleep $Wait_for_Instance_Stop\n",
+                  "      fi\n",
+                  "    done\n",
+                  "  else\n",
+                  "    sleep $Wait_Between_Pings\n",
+                  "  fi\n",
+                  "done\n"
+                  ]]},
+                "mode"  : "000550",
+                "owner" : "root",
+                "group" : "root"
+              },
+              "/root/nat_monitor_setup.sh" : {
+                "content" : { "Fn::Join" : ["", [
+                  "/usr/bin/pkill nat_monitor\n",
+                  "while [ \"$NAT_ID\" == \"\" ]; do\n",
+                  "  sleep 60\n",
+                  "  NAT_ID=`/opt/aws/bin/ec2-describe-route-tables ", { "Ref" : "PrivateRouteTable1" },
+                  " -U https://ec2.", { "Ref" : "AWS::Region" }, ".amazonaws.com | grep 0.0.0.0/0 | awk '{print $2;}'`\n",
+                  "done\n",
+                  "/bin/sed -i 's/NAT_ID=/NAT_ID=$NAT_ID/g' /root/nat_monitor.sh\n"                               
+                  ]]},
+                "mode"  : "000550",
+                "owner" : "root",
+                "group" : "root"
+              }              
+            },
+            "services" : {             
+              "sysvinit" : {
+                "cfn-hup" : {
+                  "enabled" : "true",
+                  "ensureRunning" : "true",
+                  "files" : [ "/etc/cfn/cfn-hup.conf", "/etc/cfn/hooks.d/cfn-auto-reloader.conf" ]
+                },
+                "yum-updatesd" : {
+                  "enabled" : "true",
+                  "ensureRunning" : "true"
+                }
+              }
+            }
+          },
+          "setupnatmonitor" : {
+            "commands" : {
+              "startnatmonitor1" : {
+                "command" : "/root/nat_monitor_setup.sh"
+              }
+            }
+          }  
+        }
+      },
+      "Properties" : {
+        "KeyName" : { "Ref" : "BastionKey" },
+        "InstanceType" : { "Ref" : "NatNodeInstanceType" },
+        "IamInstanceProfile" : { "Ref" : "NatRoleProfile" },
+        "ImageId" : { "Fn::FindInMap" : [ "NatAmi", { "Ref" : "AWS::Region" }, "AMI" ]},
+        "NetworkInterfaces" : [{
+          "GroupSet"                 : [{ "Ref" : "NatSecurityGroup" }],
+          "AssociatePublicIpAddress" : "true",
+          "DeviceIndex"              : "0",
+          "DeleteOnTermination"      : "true",
+          "SubnetId"                 : { "Ref" : "PubSubnet2" }
+        }],
+        "SourceDestCheck" : "false",           
+        "Tags" : [
+          { "Key" : "Name", "Value" : { "Fn::Join" : [ "", [ { "Ref" : "EnvSuffix" }, " NatInstance2" ] ] } }
+        ],  
+   		"UserData"       : { "Fn::Base64" : { "Fn::Join" : ["", [ 
+          "#!/bin/bash -v\n",
+          "exec > >(logger -t user-data -s) 2>&1\n",
+          
+          "# run cfn-init\n",
+          "/opt/aws/bin/cfn-init -c ascending -v -s ", { "Ref" : "AWS::StackId" }, " -r NatInstance2 ",
+          "    --region ", { "Ref" : "AWS::Region" },"\n",
+                              
+          "/root/nat_monitor.sh >> /tmp/nat_monitor.log &\n",
+                    
+          "# Log the last command to ensure the end of the script was reached\n",
+          "logger -t cfn-init \"The UserData script has finished!\"\n"          
+        ] ] } }
+      }
+    }
+
+  },
+
+
+  "Outputs" : {
+    
+	"PubNet01" : {
+      "Value" : { "Ref" : "PubSubnet1" },
+      "Description" : "Public SubnetId."
+    },
+    
+    "PrivNet01" : {
+      "Value" : { "Ref" : "PrivateSubnet1" },
+      "Description" : "Private 1 SubnetId."
+    },
+    
+    "PrivNet02" : {
+      "Value" : { "Ref" : "PrivateSubnet2" },
+      "Description" : "Private 2 SubnetId."
+    },
+    
+    "SimpleBastionSG" : {
+      "Value" : { "Ref" : "SimpleBastionSG" },
+      "Description" : "Simple Bastion Security Group."
+    },
+    
+    "MySqlSG" : {
+      "Value" : { "Ref" : "MySqlSG" },
+      "Description" : "MySql Database Security Group."
+    },
+    
+    "MyAppSG" : {
+      "Value" : { "Ref" : "MyAppSG" },
+      "Description" : "The App Security Group."
+    },
+    
+    "NatInstance1" : {
+      "Description" : "Nat Instance 1.",
+      "Value" : { "Ref" : "NatInstance1" }
+    },
+    
+    "NatInstance2" : {
+      "Description" : "Nat Instance 2.",
+      "Value" : { "Ref" : "NatInstance2" }
+    },
+
+    "NatInstance1PublicIp" : {
+      "Description" : "Nat Instance 1 Public IP.",
+      "Value" : { "Fn::GetAtt" : [ "NatInstance1", "PublicIp" ] }
+    },
+    
+    "NatInstance2PublicIp" : {
+      "Description" : "Nat Instance 2 Public IP.",
+      "Value" : { "Fn::GetAtt" : [ "NatInstance2", "PublicIp" ] }
+    }
+    
+  }
+}

@@ -1,0 +1,48 @@
+C:\app\Administrator\product\11.2.0\dbhome_1\NETWORK\ADMIN>lsnrctl stop LISTENER
+
+
+*** delete LISTENER.ORA file ***
+
+
+C:\app\Administrator\product\11.2.0\dbhome_1\NETWORK\ADMIN> C:\app\Administrator\product\11.2.0\dbhome_1\bin\netca /silent /responsefile C:\app\Administrator\product\11.2.0\dbhome_1\network\admin\netca.rsp
+
+Parsing command line arguments:
+    Parameter "silent" = true
+    Parameter "responsefile" = C:\app\Administrator\product\11.2.0\dbhome_1\network\admin\netca.rsp
+Done parsing command line arguments.
+Oracle Net Services Configuration:
+Configuring Listener:LISTENER
+Listener configuration complete.
+Oracle Net Listener Startup:
+    Running Listener Control:
+      C:\app\Administrator\product\11.2.0\dbhome_1\bin\lsnrctl start LISTENER
+    Listener Control complete.
+    Setting Listener service to start automatically.
+    Listener started successfully.
+Profile configuration complete.
+Oracle Net Services configuration successful. The exit code is 0
+
+
+C:\app\Administrator\product\11.2.0\dbhome_1\NETWORK\ADMIN>lsnrctl status LISTENER
+
+LSNRCTL for 64-bit Windows: Version 11.2.0.1.0 - Production on 17-FEB-2016 12:45:35
+
+Copyright (c) 1991, 2010, Oracle.  All rights reserved.
+
+Connecting to (DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=EW0000SE4TRN002.DETNSW.WIN)(PORT=1521)))
+STATUS of the LISTENER
+------------------------
+Alias                     LISTENER
+Version                   TNSLSNR for 64-bit Windows: Version 11.2.0.1.0 - Production
+Start Date                17-FEB-2016 12:45:24
+Uptime                    0 days 0 hr. 0 min. 14 sec
+Trace Level               off
+Security                  ON: Local OS Authentication
+SNMP                      OFF
+Listener Parameter File   C:\app\Administrator\product\11.2.0\dbhome_1\network\admin\listener.ora
+Listener Log File         c:\app\administrator\diag\tnslsnr\EW0000SE4TRN002\listener\alert\log.xml
+Listening Endpoints Summary...
+  (DESCRIPTION=(ADDRESS=(PROTOCOL=tcp)(HOST=EW0000SE4TRN002.DETNSW.WIN)(PORT=1521)))
+  (DESCRIPTION=(ADDRESS=(PROTOCOL=ipc)(PIPENAME=\\.\pipe\EXTPROC1521ipc)))
+The listener supports no services
+The command completed successfully

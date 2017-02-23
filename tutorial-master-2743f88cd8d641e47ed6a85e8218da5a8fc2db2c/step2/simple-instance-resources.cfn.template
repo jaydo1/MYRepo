@@ -1,0 +1,144 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+
+  "Description": "Deploy resources required for a simple Amazon Linux Instance.",
+
+  "Parameters": {
+    
+    "VpcId" : {
+      "Type": "String",
+      "Description" : "ID of the VPC you are deploying to. You must have a VPC created already."
+    },
+    
+    "AvailabilityZone1" : {
+      "Description" : "The name of the AZ in the region this is being deployed, like us-west-2a.",
+      "Type" : "String"
+    },
+    
+    "InternetGateway": {
+      "Description": "The ID of the Internet Gateway attached to the VPC.",
+      "Type": "String"
+    },
+    
+    "PubNet01" : {
+      "Description" : "A Public VPC subnet CIDR, note this should be a CIDR and not a subnet ID this time.",
+      "Type": "String"
+    },
+       
+    "YourPublicRange" : {
+      "Description" : "Address range in CIDR format for your public address range for access to the instance.",
+      "Type" : "String",
+      "ConstraintDescription" : "Must be a valid CIDR"
+    }
+    
+  },
+
+  "Resources": {  
+    
+    "PubSubnet1" : {
+      "Type" : "AWS::EC2::Subnet",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VpcId" },
+        "AvailabilityZone" : { "Ref" : "AvailabilityZone1" },
+        "CidrBlock" : { "Ref" : "PubNet01" }
+      }
+    },
+    
+    "PublicRouteTable" : {
+      "Type" : "AWS::EC2::RouteTable",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VpcId" }
+      }
+    },
+    
+    "PublicRoute1" : {
+      "Type" : "AWS::EC2::Route",
+      "Properties" : {
+        "RouteTableId" : { "Ref" : "PublicRouteTable" },
+        "DestinationCidrBlock" : "0.0.0.0/0",
+        "GatewayId" : { "Ref" : "InternetGateway" }
+      }
+    },
+    
+    "PubSubnet1RTAssoc" : {
+      "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties" : {
+        "SubnetId" : { "Ref" : "PubSubnet1" },
+        "RouteTableId" : { "Ref" : "PublicRouteTable" }
+      }
+    },
+    
+    "PublicNetworkAcl" : {
+      "Type" : "AWS::EC2::NetworkAcl",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VpcId" }
+      }
+    },
+    
+    "YourPublicTcp22ToPublic" : {
+      "Type" : "AWS::EC2::NetworkAclEntry",
+      "Properties" : {
+        "CidrBlock" : { "Ref" : "YourPublicRange" },
+        "NetworkAclId" : { "Ref" : "PublicNetworkAcl" },
+        "Protocol" : "6",
+        "RuleAction" : "allow",
+        "RuleNumber" : "10",
+        "PortRange" : { "From" : "22", "To" : "22" }
+      }
+    },
+    
+    "DefaultPublicOutboundNAclEntry" : {
+      "Type" : "AWS::EC2::NetworkAclEntry",
+      "Properties" : {
+        "CidrBlock" : "0.0.0.0/0",
+        "Egress" : "true",
+        "NetworkAclId" : { "Ref" : "PublicNetworkAcl" },
+        "Protocol" : "-1",
+        "RuleAction" : "allow",
+        "RuleNumber" : "100"
+      }
+    },
+    
+    "PubSubnet1toPublicNaclAssoc" : {
+      "Type" : "AWS::EC2::SubnetNetworkAclAssociation",
+	  "Properties" : {
+   		"SubnetId" : { "Ref" : "PubSubnet1" },
+   		"NetworkAclId" : { "Ref" : "PublicNetworkAcl" }
+	  }
+    }, 
+    
+    "SimpleInstanceSg" : {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "Properties" : {
+        "GroupDescription" : "Rules for allowing access to this Amazon Linux Instance",
+        "VpcId" : { "Ref" : "VpcId" }
+    },
+    
+    "AllowSshFromPublic" : {
+      "Type" : "AWS::EC2::SecurityGroupIngress",
+      "Properties" : {
+        "GroupId" : { "Ref" : "SimpleInstanceSg" },
+        "IpProtocol" : "tcp", 
+		"FromPort" : "22",  
+		"ToPort" : "22",  
+		"CidrIp" : { "Ref" : "YourPublicRange" }
+      }
+    }
+
+  },
+
+
+  "Outputs" : {
+    
+    "PubNet01" : {
+      "Value" : { "Ref" : "PubSubnet1" },
+      "Description" : "Public SubnetId."
+    },
+    
+    "SimpleInstanceSg" : {
+      "Value" : { "Ref" : "SimpleInstanceSg" },
+      "Description" : "Public IP Name of our Amazon Linux Instance."
+    }
+    
+  }
+}

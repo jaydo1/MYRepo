@@ -1,0 +1,263 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+
+  "Description": "Deploy a simple Bastion",
+
+  "Parameters": {
+    
+    "ProjectName": {
+      "Description": "The generic Stack project name",
+      "Type": "String",
+      "Default" : "simple"
+    },
+    
+    "EnvSuffix": {
+      "Description": "The key of the template for the EB resources and application substack",
+      "Type": "String",
+      "Default": "bastion"
+    },
+
+    "BastionKey" : {
+      "Description" : "EC2 Key Pair for Bastion Access",
+      "Type" : "String",
+      "Default" : "bastion-key", 
+      "MinLength": "1",
+      "MaxLength": "64",
+      "AllowedPattern" : "[-_ a-zA-Z0-9]*",
+      "ConstraintDescription" : "can contain only alphanumeric characters, spaces, dashes and underscores."
+    },
+    
+    "VpcId" : {
+      "Type": "String",
+      "Description" : "ID of the VPC you are deploying to.",
+      "Default" : "vpc-13cb3776"     
+    },
+    
+    "AvailabilityZone1" : {
+      "Description" : "AZ to use for VPN",
+      "Type" : "String",
+      "Default" : "us-west-2a"
+    },
+    
+    "AvailabilityZone2" : {
+      "Description" : "AZ to use for VPN",
+      "Type" : "String",
+      "Default" : "us-west-2b"
+    },
+    
+    "InternetGateway": {
+      "Description": "The ID of the Internet Gateway attached to the VPC.",
+      "Type": "String",
+      "MinLength": "1",
+      "MaxLength": "255",
+      "Default" : "igw-b6f911d3"
+    },
+    
+    "VpnGateway": {
+      "Description": "The ID of the VPN Gateway attached to the VPC that provides connectivity to LMN C1.",
+      "Type": "String",
+      "MinLength": "1",
+      "MaxLength": "255",
+      "Default" : "vgw-8470ad9a"
+    },
+
+    "BastionInstanceType" : {
+      "Description" : "Instance type for VPN nodes.",
+      "Type" : "String",
+      "Default" : "t1.micro",
+      "AllowedValues" : [ 
+        "t1.micro",
+        "m1.small",
+        "c1.medium"
+      ],
+      "ConstraintDescription" : "Acceptable values are t1.micro, m1.small or c1.medium"
+    },
+    
+    "PubNet01" : {
+      "Description" : "A Public VPC subnet ID. Specified as x.x.x.x/x",
+      "Type": "String"
+    },
+    
+    "PubNet02" : {
+      "Description" : "A Public VPC subnet ID. Specified as x.x.x.x/x",
+      "Type": "String"
+    },
+    
+    "PrivNet01" : {
+      "Description" : "A Private VPC subnet ID. Specified as x.x.x.x/x",
+      "Type": "String"
+    },
+    
+    "PrivNet02" : {
+      "Description" : "A Private VPC subnet ID. Specified as x.x.x.x/x",
+      "Type": "String"
+    },
+    
+    "CfnS3Bucket": {
+      "Description": "The key of the template for the EB resources and application substack",
+      "Type": "String",
+      "Default": "com.lmn.ops.cfn.json"
+    },
+    
+    "LmnPublic" : {
+      "Description" : "Address range in CIDR format for LMN access to resources from Public Network.",
+      "Type" : "String",
+      "ConstraintDescription" : "Must be a valid CIDR"
+    },
+    
+    "LmnPrivate" : {
+      "Description" : "Address range in CIDR format for LMN access to resources Private Network.",
+      "Type" : "String",
+      "ConstraintDescription" : "Must be a valid CIDR"
+    },
+    
+    "VpcCidr" : {
+      "Description" : "What is the VpcCidr.",
+      "Type": "String",
+      "Default" : "172.27.0.0/16"
+    },
+    
+    "MySqlDBName" : {
+      "Description" : "The database name",
+      "Type": "String",
+      "Default": "mysqlsimpledb",
+      "MinLength": "1",
+      "MaxLength": "64",
+      "AllowedPattern" : "[a-zA-Z][a-zA-Z0-9]*",
+      "ConstraintDescription" : "must begin with a letter and contain only alphanumeric characters."
+    },
+    
+    "MySqlUsername" : {
+      "NoEcho": "true",
+      "Description" : "The database admin account username",
+      "Type": "String",
+      "Default": "a1297fB1bab9",
+      "MinLength": "1",
+      "MaxLength": "16",
+      "AllowedPattern" : "[a-zA-Z][a-zA-Z0-9]*",
+      "ConstraintDescription" : "must begin with a letter and contain only alphanumeric characters."
+    },
+    
+    "MySqlPassword" : {
+      "NoEcho": "true",
+      "Description" : "The database admin account password",
+      "Type": "String",
+      "Default": "aff38Df70385",
+      "MinLength": "8",
+      "MaxLength": "41",
+      "AllowedPattern" : "[a-zA-Z0-9]*",
+      "ConstraintDescription" : "must contain only alphanumeric characters."
+    }
+    
+  },
+
+  "Mappings" : {
+    
+    "Ami" : {
+      "us-east-1"      : { "AMI" : "ami-54cf5c3d" },
+      "us-west-2"      : { "AMI" : "ami-af86c69f" },
+      "us-west-1"      : { "AMI" : "ami-b63210f3" },
+      "eu-west-1"      : { "AMI" : "ami-3c5f5748" },
+      "ap-southeast-1" : { "AMI" : "ami-ba7538e8" },
+      "ap-southeast-2" : { "AMI" : "ami-b6df4e8c" },
+      "ap-northeast-1" : { "AMI" : "ami-5d7dfa5c" },
+      "sa-east-1"      : { "AMI" : "ami-89c81394" }
+    }
+  },
+
+
+  "Resources": {
+    
+    "ResourceStack" : {
+      "Type" : "AWS::CloudFormation::Stack",
+      "Properties" : {
+        "TemplateURL" : { "Fn::Join" : ["",
+          [ "http://s3-", { "Ref" : "AWS::Region" }, ".amazonaws.com/", { "Ref" : "CfnS3Bucket" }, "/simplebastion/4/db-simple-bastion-resources.cfn.template"]
+        ]},
+        "Parameters" : {
+          "ProjectName" 					: { "Ref" : "ProjectName" },
+          "EnvSuffix"	       				: { "Ref" : "EnvSuffix" },
+          "BastionKey"            			: { "Ref" : "BastionKey" },
+          "VpcId"            				: { "Ref" : "VpcId" },
+          "VpcCidr"            				: { "Ref" : "VpcCidr" },
+          "AvailabilityZone1"            	: { "Ref" : "AvailabilityZone1" },
+          "AvailabilityZone2"            	: { "Ref" : "AvailabilityZone2" },
+          "InternetGateway"    				: { "Ref" : "InternetGateway" },
+          "VpnGateway"            			: { "Ref" : "VpnGateway" },
+          "PubNet01"            			: { "Ref" : "PubNet01" },
+          "PubNet02"            			: { "Ref" : "PubNet02" },
+          "PrivNet01"            			: { "Ref" : "PrivNet01" },
+          "PrivNet02"            			: { "Ref" : "PrivNet02" },
+          "LmnPublic"            			: { "Ref" : "LmnPublic" },
+          "LmnPrivate"            			: { "Ref" : "LmnPrivate" }
+        }
+      }
+    }, 
+    
+    "HostsStack" : {
+      "Type" : "AWS::CloudFormation::Stack",
+      "Properties" : {
+        "TemplateURL" : { "Fn::Join" : ["",
+          [ "http://s3-", { "Ref" : "AWS::Region" }, ".amazonaws.com/", { "Ref" : "CfnS3Bucket" }, "/simplebastion/4/db-simple-bastion-hosts.cfn.template"]
+        ]},
+        "Parameters" : {
+          "BastionKey"            			: { "Ref" : "BastionKey" },
+          "EnvSuffix"	       				: { "Ref" : "EnvSuffix" },
+          "BastionInstanceType"            	: { "Ref" : "BastionInstanceType" },
+          "LmnPublic"            			: { "Ref" : "LmnPublic" },
+          "SimpleBastionSG"					: { "Fn::GetAtt" : [ "ResourceStack", "Outputs.SimpleBastionSG" ] },
+          "PubNet01"						: { "Fn::GetAtt" : [ "ResourceStack", "Outputs.PubNet01" ] }
+        }
+      },
+      "DependsOn" : "ResourceStack"
+    },
+    
+    "MySqlStack" : {
+      "Type" : "AWS::CloudFormation::Stack",
+      "Properties" : {
+        "TemplateURL" : { "Fn::Join" : ["",
+          [ "http://s3-", { "Ref" : "AWS::Region" }, ".amazonaws.com/", { "Ref" : "CfnS3Bucket" }, "/simplebastion/4/db-simple-bastion-db.cfn.template" ]
+        ]},
+        "Parameters" : {
+          "MySqlSG" 						: { "Fn::GetAtt" : [ "ResourceStack", "Outputs.MySqlSG" ] },
+          "MyAppSG"							: { "Fn::GetAtt" : [ "ResourceStack", "Outputs.MyAppSG" ] },
+          "MySqlUsername"      				: { "Ref" : "MySqlUsername" },
+          "MySqlDBName"        				: { "Ref" : "MySqlDBName" },
+          "MySqlPassword"      				: { "Ref" : "MySqlPassword" },
+          "EnvSuffix"	       				: { "Ref" : "EnvSuffix" },
+          "Subnets"            				: { "Fn::Join" : [ ",", [ { "Fn::GetAtt" : [ "ResourceStack", "Outputs.PrivNet01" ] }, { "Fn::GetAtt" : [ "ResourceStack", "Outputs.PrivNet02" ] } ] ] }
+        }
+      },
+      "DependsOn" : "ResourceStack"
+    },
+    
+    "MyAppStack" : {
+      "Type" : "AWS::CloudFormation::Stack",
+      "Properties" : {
+        "TemplateURL" : { "Fn::Join" : ["",
+          [ "http://s3-", { "Ref" : "AWS::Region" }, ".amazonaws.com/", { "Ref" : "CfnS3Bucket" }, "/simplebastion/4/db-simple-bastion-app.cfn.template"]
+        ]},
+        "Parameters" : {
+          "BastionKey"            			: { "Ref" : "BastionKey" },
+          "EnvSuffix"	       				: { "Ref" : "EnvSuffix" },
+          "BastionInstanceType"            	: { "Ref" : "BastionInstanceType" },
+          "LmnPrivate"            			: { "Ref" : "LmnPrivate" },
+          "MyAppSG"							: { "Fn::GetAtt" : [ "ResourceStack", "Outputs.MyAppSG" ] },
+          "SimpleBastionSG"					: { "Fn::GetAtt" : [ "ResourceStack", "Outputs.SimpleBastionSG" ] },
+          "PrivNet01"						: { "Fn::GetAtt" : [ "ResourceStack", "Outputs.PrivNet01" ] },
+          "MySqlEndpointAddress"			: { "Fn::GetAtt" : [ "MySqlStack", "Outputs.MySqlEndpointAddress" ] },
+          "MySqlEndpointPort"				: { "Fn::GetAtt" : [ "MySqlStack", "Outputs.MySqlEndpointPort" ] }
+        }
+      },
+      "DependsOn" : "MySqlStack"
+    }
+    
+    
+    
+  },
+
+
+  "Outputs" : {
+    
+  }
+}

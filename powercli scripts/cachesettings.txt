@@ -1,0 +1,78 @@
+SQL> show sga
+
+Total System Global Area 6263357440 bytes
+Fixed Size                  2292848 bytes
+Variable Size            2936013712 bytes
+Database Buffers         3305111552 bytes
+Redo Buffers               19939328 bytes
+SQL> select sum(bytes)/1024/1024 as mb from dba_segments where segment_name in ('PEOPLE', 'RC_REPORTS_LOG', 'FEES_LIST');
+
+        MB
+----------
+      2687
+
+SQL> show parameter memory
+
+NAME                                 TYPE        VALUE
+------------------------------------ ----------- ------------------------------
+hi_shared_memory_address             integer     0
+memory_max_target                    big integer 6000M
+memory_target                        big integer 6000M
+shared_memory_address                integer     0
+SQL> host mem
+'mem' is not recognized as an internal or external command,
+operable program or batch file.
+
+SQL> alter system set memory_max_target=9G scope=spfile;
+
+System altered.
+
+SQL> c/max_/
+  1* alter system set memory_target=9G scope=spfile
+SQL> /
+
+System altered.
+
+SQL> show parameter keep
+
+NAME                                 TYPE        VALUE
+------------------------------------ ----------- ------------------------------
+buffer_pool_keep                     string
+control_file_record_keep_time        integer     7
+db_keep_cache_size                   big integer 0
+SQL> alter system set db_keep_cache_size=3G scope=spfile;
+
+System altered.
+
+SQL> declare
+  2    cursor seg_csr is select owner, table_name from dba_tables where table_name in ('PEOPLE', 'RC_REPORTS_LOG', 'FEES_LIST');
+  3  begin
+  4    for l_seg in seg_csr loop
+  5      execute immediate 'ALTER TABLE ' || l_seg.owner || '.' || l_seg.table_name || ' STORAGE(BUFFER POOL KEEP)';
+  6    end loop;
+  7  end;
+  8  /
+declare
+*
+ERROR at line 1:
+ORA-02143: invalid STORAGE option
+ORA-06512: at line 5
+
+
+SQL> 5
+  5*     execute immediate 'ALTER TABLE ' || l_seg.owner || '.' || l_seg.table_name || ' STORAGE(BUFFER POOL KEEP)';
+SQL> c/buffer pool/BUFFER_POOL
+  5*     execute immediate 'ALTER TABLE ' || l_seg.owner || '.' || l_seg.table_name || ' STORAGE(BUFFER_POOL KEEP)';
+SQL> /
+
+PL/SQL procedure successfully completed.
+
+SQL> l
+  1  declare
+  2    cursor seg_csr is select owner, table_name from dba_tables where table_name in ('PEOPLE', 'RC_REPORTS_LOG', 'FEES_LIST');
+  3  begin
+  4    for l_seg in seg_csr loop
+  5      execute immediate 'ALTER TABLE ' || l_seg.owner || '.' || l_seg.table_name || ' STORAGE(BUFFER_POOL KEEP)';
+  6    end loop;
+  7* end;
+SQL>

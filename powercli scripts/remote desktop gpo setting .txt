@@ -1,0 +1,7 @@
+Open gpedit.msc
+
+Browse to Computer Configuration --> Administrative Templates --> Windows Components --> Remote Desktop Services --> Remote Desktop Session Host --> Session Time Limits.
+
+Enable the "Set time limit for disconnected sessions" and set it to Never
+
+and change the Local Security Policy under Local Policies->Security Options-> Interactive logon: Do not require CTRL+ALT+Del" to Enabled, the problem dissapears.

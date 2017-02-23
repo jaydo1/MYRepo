@@ -1,0 +1,235 @@
+﻿<#
+.SYNOPSIS
+   Script automates deployment of multiple vms loaded from pre-defined .csv file and invoke-script to do post deployment tasks 
+.DESCRIPTION
+   Script reads the .csv file, deploys vms from template, Renames hostname, set up IP configuration via VMware tools, Joins to domain,Runs Silent install of Orcale Listener and sets EBS institution settings via SQLPlus   
+.PARAMETER 
+   none
+.EXAMPLE
+   trivia
+.Disclaimer
+	There is very little error handling in this script, tasks that fail, will continue on etc..., this needs to be addressed when there is time. - SB 19.2.2016
+Version Change Notes
+1.0 - Created the first template script, please update version number when making changes and update filename also - SB 19.2.2016
+1.1 - Updated institution settings path - SB 22.2.2016
+#>
+
+#----Configure Variables--------
+#Script Version: 1.1
+$csvfile = "C:\Users\sbochin\Desktop\Jamies Script\vms2deploy.csv"
+$vcenter = "PW0992VIVCR001.vi.det.nsw.edu.au"
+$vmcluster = "Non_Prod_EBS_1_UN"
+$vmDSCluster = "npebs1un-xivun01-dsc"
+$vmtemplate = "udvuxpoc004_gold2"
+$vmfolder = "EBS4 Training Standalone"
+$GuestUser = "Administrator"
+$GuestPassword = "LMBR123$"
+
+$domJoinDomain = "detnsw.win"
+$domJoinAcc = "srvE4Standalonedomjoin"
+$domJoinPwd = "TwE92cm6Zm84laSoOvKX"
+
+$primaryDNS = "10.7.71.33"
+$SNMi = "255.255.255.192"
+$label = "vlan0766-p1npebsun"
+$maxPings = 20
+$vmToolTimeout = 300 #Seconds
+#----END Configure Variables DO NOT EDIT PAST HERE!-----
+
+
+$vms2deploy = Import-Csv -Path $csvfile
+
+$Error.Clear()
+#Load VMware Snapin
+try
+{
+    if ( (Get-PSSnapin -Name VMware.VimAutomation.Core -ErrorAction SilentlyContinue) -eq $null )
+    {
+        Add-PSSnapin VMware.VimAutomation.Core | Out-Null
+		write-host "VMware snapin loaded"
+    }#if 
+	else
+	{
+		write-host "VMware snapin already loaded"
+	}
+}#try load VMware Snapin
+catch
+{
+    write-host "Could not load VMware snapin. `[$($Error[0].Exception.InnerException.Message)`]" -ForegroundColor Red
+}
+
+#Connect to vcenter server  
+connect-viserver $vcenter
+
+function runInvokeVMScript($scriptData,$scriptType)
+{
+	try
+	{
+		$timeout = new-timespan -seconds $vmToolTimeout
+		$sw = [diagnostics.stopwatch]::StartNew()
+		
+		$toolsStatus = ""
+		
+		do 
+		{
+			$toolsStatus = (Get-VM $vm.name | Get-View).Guest.ToolsStatus
+			write-host "Checking VMTools status"				
+			sleep 5
+		} until (($toolsStatus -eq 'toolsOk') -or ($sw.elapsed -gt $timeout) -or ($toolsStatus -eq 'toolsOld'))
+			
+		if(($toolsStatus -eq 'toolsOk') -or ($toolsStatus -eq 'toolsOld'))
+		{
+			write-host "$toolsStatus" -ForegroundColor Green
+			
+			#Invoke-Script to change hostname 
+			try
+			{
+				#Define script to be run remotely
+				write-host "Running script on remote VM: `n`"$script`"" -ForegroundColor Yellow
+				
+				Invoke-VMScript -VM $vm.name -GuestUser $GuestUser -GuestPassword $GuestPassword -ScriptText $scriptData -ScriptType $scriptType
+				
+				write-host "Script has run remotely" -ForegroundColor Green
+			}
+			catch
+			{
+				write-host "Failed to run remote script: `[$($Error[0].Exception.InnerException.Message)`]" -ForegroundColor Red
+			}
+		}
+		else
+		{
+			write-host "Timeout reached, OS did not respond." -ForegroundColor Red
+		}
+	}#end try get VM tools status
+	catch
+	{
+		write-host = "Failed to detect VM Tools: `[$($Error[0].Exception.InnerException.Message)`]" -ForegroundColor Red
+	}
+}#End runInvokeVMScript function
+
+
+#deploy vms as per information in each line, 
+foreach ($vm in $vms2deploy) 
+{
+	#validate input, at least vm name, template name 
+	if (($vm.name -ne "") -and ($vmtemplate -ne "") )
+	{
+		#check if vm with this name already exists
+		if (!(get-vm $vm.name -ErrorAction SilentlyContinue))
+		
+		#test only
+		#if ((get-vm $vm.name -ErrorAction SilentlyContinue) -and ($vm.name -eq "ew0000se4trn004"))
+		{
+			write-host "Setting up VM: $($vm.name)"
+			
+			#Create the VM object
+			$vmobj = get-vm $vm.name
+			
+			
+			#----------------
+			#Deploying new vm from template
+			Write-Host "Getting cluster: $vmcluster" -ForegroundColor Green
+			$vmhost = get-cluster $vmcluster | get-vmhost -state connected | Get-Random
+			
+			Write-Host "Creatin VM: $($vm.name)" -ForegroundColor Green
+			new-vm -name $vm.name -template $(get-template -name $vmtemplate) -vmhost $vmhost -datastore $(get-datastorecluster -name $vmDSCluster) -location $(get-folder -name $vmfolder) | Out-Null
+			# track deployment progress
+
+			write-host "Starting VM $($vm.Name)"
+			start-vm -vm $vm.Name -confirm:$false | Out-Null
+			#-------
+			
+			
+			#----------------
+			#Change hostname
+			Write-Host "Changing hostname" -ForegroundColor Green
+			$script = "Rename-Computer -NewName $($vm.name) -Restart"
+			runInvokeVMScript $script "powershell"
+			#----------------
+			
+			
+			#----------------
+			#Set new IP settings, needs Local Administrator credentials. Double check Subnet Mask and DNS IPs.
+			
+			#WARNING: The 'Get-VMGuestNetworkInterface' cmdlet is deprecated. Use the 'Invoke-VMGuestScript' cmdlet instead.
+			$vmguestnic = $vmobj | Get-VMGuestNetworkInterface -GuestUser $GuestUser -GuestPassword $GuestPassword
+			
+			Write-Host "Setting IP address" -ForegroundColor Green			
+			$script = "c:\windows\system32\netsh.exe interface ip set address ""$($vmguestnic.name)"" static $($vm.ip) $SNMi $($vm.gw) 1"
+			runInvokeVMScript $script "bat"
+			Write-Host "Setting Primary DNS" -ForegroundColor Green
+			$script = "c:\windows\system32\netsh.exe interface ip set dns ""$($vmguestnic.name)"" static $primaryDNS None"
+			runInvokeVMScript $script "bat"
+			Write-Host "Setting Secondary DNS" -ForegroundColor Green
+			$script = "c:\windows\system32\netsh.exe interface ip add dns ""$($vmguestnic.name)"" $primaryDNS"
+			runInvokeVMScript $script "bat"
+			Write-Host "Setting IP address completed"
+			#----------------
+			
+			
+			#----------------
+			#Change port group label.  
+			Write-Host "Changing network label: $label" -ForegroundColor Green 
+			$vmobj | Get-NetworkAdapter  | Set-NetworkAdapter -NetworkName $label -connected:$true -StartConnected:$true -confirm:$false
+			$pingCount = 0
+			
+			#Ping the server till it's successful or reached maxping count
+			while ((($(Get-WmiObject win32_pingstatus -Filter "address='$($vm.ip)'").statuscode) -ne 0) -or ($pingCount -gt $maxPings))
+			{
+				Write-Host "Could not ping server $($vm.name), sleeping for 10 seconds." -ForegroundColor Yellow
+				sleep 10
+				$pingCount ++
+			}
+			Write-Host "Ping Success - server $($vm.name)" -ForegroundColor Green
+			Write-Host "Network label set" -ForegroundColor Green
+			#----------------
+			
+
+			#----------------
+			#Join to the domain
+			Write-Host "Joining to domain" -ForegroundColor Green
+			$script = "Add-Computer -Computername $($vm.name) -DomainName $domJoinDomain -Credential `$(new-object -typename System.Management.Automation.PSCredential -argumentlist '$domJoinDomain\$domJoinAcc',`$(ConvertTo-SecureString $($domJoinPwd) -AsPlainText -Force)) -Restart"										
+			runInvokeVMScript $script "powershell"
+			#----------------
+			
+			
+			#----------------
+			#Install Oracle Listener
+			Write-Host "Installing Oracle Listener" -ForegroundColor Green
+			$script = "C:\app\Administrator\product\11.2.0\dbhome_1\bin\netca.bat /silent /responsefile C:\app\Administrator\product\11.2.0\dbhome_1\network\admin\netca.rsp"
+			runInvokeVMScript $script "bat"
+			#----------------
+			
+			
+			#----------------
+			#Start EBS services
+			Write-Host "Starting EBS Services" -ForegroundColor Green
+			$script = "get-service 'ebs*' | where status -eq 'Stopped' | Start-Service"
+			runInvokeVMScript $script "powershell"
+			#----------------
+			
+			#----------------
+			#Set Institute settings domain and URL
+			Write-Host "Setting Domain and URL Institute Settings" -ForegroundColor Green
+			$script = "sqlplus / as sysdba @C:\Utilities\institutionSettings\LoopingUpdatewebconfigRCDomainandRCURL.sql"
+			runInvokeVMScript $script "bat"
+			#----------------
+			
+			<#
+			#----------------
+			#Set Institute settings webconfig
+			Write-Host "Setting WebConfig Institute Settings" -ForegroundColor Green
+			$script = "sqlplus / as sysdba @c:\****\**.sql"
+			runInvokeVMScript $script "bat"
+			#----------------
+			#>
+			
+		}#end if VM not found
+		else
+		{
+			Write-Host "VM $($vm.name) exists, skipping ..." -ForegroundColor Red
+		}
+	}#end if VM exists
+
+
+}#end foreach VM

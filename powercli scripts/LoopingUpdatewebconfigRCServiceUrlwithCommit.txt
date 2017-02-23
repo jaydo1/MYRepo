@@ -1,0 +1,40 @@
+--UPDATE RC Parameters
+
+SET SERVEROUTPUT ON
+
+DECLARE
+v_dsql VARCHAR2(32767);
+v_parameter_value VARCHAR2(250);
+
+
+
+
+TYPE IOcursor IS REF CURSOR;
+ourCursor IOcursor;
+
+BEGIN 
+
+FOR REC IN
+	(
+	 SELECT OWNER
+	 FROM SYS.ALL_OBJECTS
+	 WHERE OWNER NOT IN
+		('SYSTEM', 'XDB', 'SYS', 'TSMSYS',  'MDSYS', 'EXFSYS',  'WMSYS', 'ORDSYS',  'OUTLN', 'DBSNMP','PUBLIC','APPQOSSYS')
+	 AND OBJECT_NAME='WEB_CONFIG'
+	 AND OBJECT_TYPE='TABLE'
+	)
+LOOP 
+	v_dsql :=	'
+			
+			  UPDATE ' ||REC.OWNER||'.web_config 
+				SET parameter_value = ''http://yourdomain/''
+				WHERE parameter=''RCWebServiceBaseUrl''
+        AND created_by=''INSTALL''
+				';
+	EXECUTE immediate v_dsql;
+
+END LOOP;
+
+END;
+/
+commit;

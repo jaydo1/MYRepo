@@ -1,0 +1,214 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+
+  "Description": "Deploy a simple Amazon Linux Instance, using multiple templates to demonstrate parent/child relationships. This template assumes you already have a VPC and IGW created.",
+
+  "Parameters": {
+    
+    "KeyName" : {
+      "Description" : "EC2 Key Pair for SSH Access, you must have created these prior to running this.",
+      "Type" : "String",
+      "Default" : "your-key-name-goes-here", 
+      "MinLength": "1",
+      "MaxLength": "64",
+      "AllowedPattern" : "[-_ a-zA-Z0-9]*",
+      "ConstraintDescription" : "can contain only alphanumeric characters, spaces, dashes and underscores."
+    },
+    
+    "VpcId" : {
+      "Type": "String",
+      "Description" : "ID of the VPC you are deploying to. You must have a VPC created already."
+    },
+    
+    "AvailabilityZone1" : {
+      "Description" : "The name of the AZ in the region this is being deployed, like us-west-2a.",
+      "Type" : "String"
+    },
+    
+    "AvailabilityZone2" : {
+      "Description" : "The name of the second AZ in the region this is being deployed, like us-west-2b. Use a second AZ for high availability.",
+      "Type" : "String"
+    },
+    
+    "InternetGateway": {
+      "Description": "The ID of the Internet Gateway attached to the VPC.",
+      "Type": "String",
+      "MinLength": "1",
+      "MaxLength": "255"
+    },
+
+    "InstanceType" : {
+      "Description" : "Instance type for node that's being created.",
+      "Type" : "String",
+      "Default" : "t1.micro",
+      "AllowedValues" : [ 
+        "t1.micro",
+        "m1.small",
+        "c1.medium"
+      ],
+      "ConstraintDescription" : "Acceptable values are t1.micro, m1.small or c1.medium"
+    },
+    
+    "PubNet01" : {
+      "Description" : "This should be the CIDR that you want to give to the public subnet that will be created, in the format x.x.x.x/x.",
+      "Type": "String"
+    },
+    
+    "PrivNet01" : {
+      "Description" : "A Private VPC subnet ID. Specified as x.x.x.x/x, if you're doing this in your own VPC be careful not to duplicate a subnet or it will fail.",
+      "Type": "String"
+    },
+    
+    "PrivNet02" : {
+      "Description" : "A Private VPC subnet ID. Specified as x.x.x.x/x. The same as above, make sure you do not duplicate this.",
+      "Type": "String"
+    },
+    
+    "CfnS3Bucket" : {
+      "Description": "Put the name of the bucket you are using to carry out this tutorial here.",
+      "Type" : "String"
+    },    
+    
+    "Step" : {
+      "Description" : "Which step are you currently on?",
+      "Type" : "String",
+      "AllowedValues" : ["step1", "step2", "step3", "step4"]
+    }, 
+    
+    "MySqlDBName" : {
+      "Description" : "The database name",
+      "Type": "String",
+      "Default": "mysqlsimpledb",
+      "MinLength": "1",
+      "MaxLength": "64",
+      "AllowedPattern" : "[a-zA-Z][a-zA-Z0-9]*",
+      "ConstraintDescription" : "must begin with a letter and contain only alphanumeric characters."
+    },
+    
+    "MySqlUsername" : {
+      "NoEcho": "true",
+      "Description" : "The database admin account username",
+      "Type": "String",
+      "Default": "",
+      "MinLength": "1",
+      "MaxLength": "16",
+      "AllowedPattern" : "[a-zA-Z][a-zA-Z0-9]*",
+      "ConstraintDescription" : "must begin with a letter and contain only alphanumeric characters."
+    },
+    
+    "MySqlPassword" : {
+      "NoEcho": "true",
+      "Description" : "The database admin account password",
+      "Type": "String",
+      "Default": "",
+      "MinLength": "8",
+      "MaxLength": "41",
+      "AllowedPattern" : "[a-zA-Z0-9]*",
+      "ConstraintDescription" : "must contain only alphanumeric characters."
+    },
+    
+    "YourPublicRange" : {
+      "Description" : "Address range in CIDR format for your public address range for access to the instance.",
+      "Type" : "String",
+      "ConstraintDescription" : "Must be a valid CIDR"
+    }    
+    
+  },
+
+  "Mappings" : {
+    
+    "Ami" : {
+      "us-east-1"      : { "AMI" : "ami-54cf5c3d" },
+      "us-west-2"      : { "AMI" : "ami-af86c69f" },
+      "us-west-1"      : { "AMI" : "ami-b63210f3" },
+      "eu-west-1"      : { "AMI" : "ami-3c5f5748" },
+      "ap-southeast-1" : { "AMI" : "ami-ba7538e8" },
+      "ap-southeast-2" : { "AMI" : "ami-b6df4e8c" },
+      "ap-northeast-1" : { "AMI" : "ami-5d7dfa5c" },
+      "sa-east-1"      : { "AMI" : "ami-89c81394" }
+    }
+  },
+
+
+  "Resources": {
+    
+    "ResourceStack" : {
+      "Type" : "AWS::CloudFormation::Stack",
+      "Properties" : {
+        "TemplateURL" : { "Fn::Join" : ["",
+          [ "http://s3-", { "Ref" : "AWS::Region" }, ".amazonaws.com/", { "Ref" : "CfnS3Bucket" }, "/", { "Ref" : "Step" }, "/db-simple-resources.cfn.template"]
+        ]},
+        "Parameters" : {
+          "VpcId"            				: { "Ref" : "VpcId" },
+          "AvailabilityZone1"            	: { "Ref" : "AvailabilityZone1" },
+          "AvailabilityZone2"            	: { "Ref" : "AvailabilityZone2" },
+          "InternetGateway"    				: { "Ref" : "InternetGateway" },
+          "PubNet01"            			: { "Ref" : "PubNet01" },
+          "PrivNet01"            			: { "Ref" : "PrivNet01" },
+          "PrivNet02"            			: { "Ref" : "PrivNet02" },
+          "YourPublicRange"        			: { "Ref" : "YourPublicRange" }
+        }
+      }
+    }, 
+    
+    "HostsStack" : {
+      "Type" : "AWS::CloudFormation::Stack",
+      "Properties" : {
+        "TemplateURL" : { "Fn::Join" : ["",
+          [ "http://s3-", { "Ref" : "AWS::Region" }, ".amazonaws.com/", { "Ref" : "CfnS3Bucket" }, "/", { "Ref" : "Step" }, "/db-simple-hosts.cfn.template"]
+        ]},
+        "Parameters" : {
+          "KeyName"            				: { "Ref" : "KeyName" },
+          "InstanceType"  		          	: { "Ref" : "InstanceType" },
+          "YourPublicRange"        			: { "Ref" : "YourPublicRange" },
+          "SimpleBastionSg"					: { "Fn::GetAtt" : [ "ResourceStack", "Outputs.SimpleBastionSg" ] },
+          "PubNet01"						: { "Fn::GetAtt" : [ "ResourceStack", "Outputs.PubNet01" ] }
+        }
+      }
+    },
+    
+    "MySqlStack" : {
+      "Type" : "AWS::CloudFormation::Stack",
+      "Properties" : {
+        "TemplateURL" : { "Fn::Join" : ["",
+          [ "http://s3-", { "Ref" : "AWS::Region" }, ".amazonaws.com/", { "Ref" : "CfnS3Bucket" }, "/", { "Ref" : "Step" }, "/db-simple-db.cfn.template" ]
+        ]},
+        "Parameters" : {
+          "MyAppSg" 						: { "Fn::GetAtt" : [ "ResourceStack", "Outputs.MySqlSg" ] },
+          "MyAppSg"							: { "Fn::GetAtt" : [ "ResourceStack", "Outputs.MyAppSg" ] },
+          "MySqlUsername"      				: { "Ref" : "MySqlUsername" },
+          "MySqlDBName"        				: { "Ref" : "MySqlDBName" },
+          "MySqlPassword"      				: { "Ref" : "MySqlPassword" },
+          "Subnets"            				: { "Fn::Join" : [ ",", [ { "Fn::GetAtt" : [ "ResourceStack", "Outputs.PrivNet01" ] }, { "Fn::GetAtt" : [ "ResourceStack", "Outputs.PrivNet02" ] } ] ] }
+        }
+      }
+    },
+    
+    "MyAppStack" : {
+      "Type" : "AWS::CloudFormation::Stack",
+      "Properties" : {
+        "TemplateURL" : { "Fn::Join" : ["",
+          [ "http://s3-", { "Ref" : "AWS::Region" }, ".amazonaws.com/", { "Ref" : "CfnS3Bucket" }, "/", { "Ref" : "Step" }, "/db-simple-app.cfn.template"]
+        ]},
+        "Parameters" : {
+          "BastionKey"            			: { "Ref" : "KeyName" },
+          "InstanceType"         		   	: { "Ref" : "InstanceType" },
+          "MyAppSg"							: { "Fn::GetAtt" : [ "ResourceStack", "Outputs.MyAppSg" ] },
+          "SimpleInstanceSg"				: { "Fn::GetAtt" : [ "ResourceStack", "Outputs.SimpleInstanceSg" ] },
+          "PrivNet01"						: { "Fn::GetAtt" : [ "ResourceStack", "Outputs.PrivNet01" ] },
+          "MySqlEndpointAddress"			: { "Fn::GetAtt" : [ "MySqlStack", "Outputs.MySqlEndpointAddress" ] },
+          "MySqlEndpointPort"				: { "Fn::GetAtt" : [ "MySqlStack", "Outputs.MySqlEndpointPort" ] }
+        }
+      },
+      "DependsOn" : "MySqlStack"
+    }
+    
+    
+    
+  },
+
+
+  "Outputs" : {
+    
+  }
+}
